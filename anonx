@@ -1,0 +1,1002 @@
+#!/usr/bin/env bash
+#
+#  anonx  —  full-system anonymizer (transparent Tor gateway)
+#  ------------------------------------------------------------
+#   * routes EVERY TCP connection through Tor (no proxychains needed)
+#   * forces ALL DNS through Tor  (no DNS leak)
+#   * blocks ALL IPv6            (kills the #1 leak vector)
+#   * randomizes MAC on start
+#   * rotates the Tor exit IP every 5 minutes
+#   * hard firewall lock: anything that is NOT Tor is DROPPED
+#
+#  Usage:
+#     sudo anonx start [30s] # go anonymous (optional rotation interval)
+#     sudo anonx stop        # restore normal networking, stop Tor
+#     sudo anonx status      # colored live status (IP / MAC / DNS / Tor)
+#     sudo anonx ip          # rotate exit IP right now
+#     sudo anonx mac         # randomize MAC right now
+#     sudo anonx interval 2m # set the rotation interval (10s .. 1h)
+#     sudo anonx doctor      # layer-by-layer connectivity diagnosis
+#     sudo anonx repair      # force-restore a half-broken state
+#     sudo anonx enable      # start on boot   (disable removes it)
+#
+#  anonx 1.0.0 — MIT
+#
+set -o pipefail
+
+# ---------------- config ----------------
+INTERVAL=300                       # default seconds between IP rotations (5 min)
+ROTATE_MAC_EACH_CYCLE=0            # 1 = also change MAC every cycle (disrupts wifi)
+TOR_USER="debian-tor"
+STATE=/var/lib/anonx
+MIN_INTERVAL=10                    # Tor rate-limits NEWNYM; below this it is a no-op
+
+# a saved interval (anonx interval 45s) wins over the default above
+[ -r "$STATE/interval" ] && INTERVAL=$(cat "$STATE/interval" 2>/dev/null)
+case "$INTERVAL" in ''|*[!0-9]*) INTERVAL=300 ;; esac
+NON_TOR="127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16"
+# ----------------------------------------
+
+VERSION="1.0"
+AUTHOR="sidh4ck3r"
+
+# colors
+R=$'\e[31m'; G=$'\e[32m'; Y=$'\e[33m'; B=$'\e[34m'; C=$'\e[36m'; M=$'\e[35m'
+W=$'\e[1;37m'; D=$'\e[2m'; N=$'\e[0m'; BOLD=$'\e[1m'
+
+# state chips (coloured background) for the one-word verdict in `status`
+CHIP_ON=$'\e[42m\e[30m\e[1m'    # green  — anonymous
+CHIP_OFF=$'\e[43m\e[30m\e[1m'   # yellow — off, real identity
+CHIP_BAD=$'\e[41m\e[97m\e[1m'   # red    — locked but broken
+
+# accent colour, freshly picked on every run — the banner and the author tag
+# change colour each time you call the tool
+ACCENTS=($'\e[31m' $'\e[32m' $'\e[33m' $'\e[34m' $'\e[35m' $'\e[36m' \
+         $'\e[91m' $'\e[92m' $'\e[93m' $'\e[94m' $'\e[95m' $'\e[96m')
+A=${ACCENTS[$((RANDOM % ${#ACCENTS[@]}))]}
+
+banner(){
+  printf "\n  ${A}${BOLD}anonx${N} ${W}v%s${N}  ${D}·${N}  %s\n" "$VERSION" "full-system Tor anonymizer"
+  printf "  ${A}${BOLD}▸${N} ${D}author:${N} ${A}${BOLD}%s${N}\n\n" "$AUTHOR"
+}
+
+sig(){ printf "  ${D}anonx v%s${N} ${D}·${N} ${A}%s${N}\n" "$VERSION" "$AUTHOR"; }
+
+# Every reading this tool does is root-only: iptables/ip6tables rules, the Tor
+# control auth cookie, and the permanent MAC (SIOCETHTOOL). Run as a normal user
+# those all fail *silently* and the output lies — "?% bootstrapped", "Firewall
+# lock: off", "MAC NOT spoofed" — while anonx is in fact running fine. So never
+# run unprivileged: re-exec through sudo instead.
+# help and version read nothing, so they never need to ask for a password
+case "${1:-}" in ''|help|--help|-h|version|--version|-v) ANONX_NOSUDO=1 ;; esac
+
+if [ "$(id -u)" -ne 0 ] && [ -z "$ANONX_NOSUDO" ]; then
+  if command -v sudo >/dev/null 2>&1; then
+    ANONX_SELF=$(readlink -f "$0" 2>/dev/null)
+    [ -x "$ANONX_SELF" ] || ANONX_SELF=$(command -v anonx 2>/dev/null)
+    exec sudo ANONX_NOSUDO=1 "${ANONX_SELF:-/usr/local/bin/anonx}" "$@"
+  fi
+  echo "${R}anonx needs root (and sudo is not installed): run it as root.${N}"; exit 1
+fi
+
+# Primary interface = the one carrying the default route with the LOWEST metric,
+# i.e. the link traffic actually leaves by right now (eth0 beats wlan0 when both
+# are up). Recomputed on every invocation, so switching wifi->cable needs nothing.
+detect_iface(){
+  ip route show default 2>/dev/null | awk '
+    /default/{ m=99999; for(i=1;i<NF;i++) if($i=="metric") m=$(i+1)+0
+               for(i=1;i<=NF;i++) if($i=="dev") d=$(i+1)
+               if(d!="" && m<best){best=m; pick=d} }
+    BEGIN{best=1e9} END{if(pick!="") print pick}'
+}
+IFACE=$(detect_iface)
+[ -z "$IFACE" ] && IFACE=$(ip -o link show up 2>/dev/null | awk -F': ' '$2!="lo"{print $2; exit}')
+
+# every NM connection that is currently active on a real device
+active_ifaces(){
+  nmcli -t -f DEVICE,TYPE connection show --active 2>/dev/null \
+    | awk -F: '$1!="" && $1!="lo" && $2!="loopback"{print $1}'
+}
+TOR_UID=$(id -u "$TOR_USER" 2>/dev/null)
+
+# ---------------- duration handling (10s / 90s / 2m / 1h) ----------------
+parse_dur(){
+  local v="$1" n u
+  n=${v%%[smhSMH]*}; u=${v#"$n"}
+  case "$n" in ''|*[!0-9]*) return 1 ;; esac
+  case "$u" in
+    ''|s|S) echo "$n" ;;
+    m|M)    echo $((n*60)) ;;
+    h|H)    echo $((n*3600)) ;;
+    *)      return 1 ;;
+  esac
+}
+
+human_dur(){
+  local s="$1"
+  if   [ "$s" -lt 60 ];            then echo "${s}s"
+  elif [ $((s%3600)) -eq 0 ];      then echo "$((s/3600))h"
+  elif [ $((s%60))   -eq 0 ];      then echo "$((s/60)) min"
+  else echo "$((s/60))m $((s%60))s"; fi
+}
+
+line(){ printf "${D}────────────────────────────────────────────────────────${N}\n"; }
+need_root(){ [ "$(id -u)" -eq 0 ] || { echo "${R}Run as root:  sudo anonx $1${N}"; exit 1; }; }
+ok(){   printf "  ${G}✔${N} %s\n" "$1"; }
+bad(){  printf "  ${R}✘${N} %s\n" "$1"; }
+warn(){ printf "  ${Y}!${N} %s\n" "$1"; }
+info(){ printf "  ${C}•${N} %s\n" "$1"; }
+
+# ---------------- tor control port ----------------
+# One authenticated command, response echoed on stdout.
+tor_ctl(){
+  local cookie
+  cookie=$(xxd -ps -c 32 /run/tor/control.authcookie 2>/dev/null | tr -d '\n')
+  [ -z "$cookie" ] && return 1
+  exec 3<>/dev/tcp/127.0.0.1/9051 2>/dev/null || return 1
+  printf 'AUTHENTICATE %s\r\n%s\r\nQUIT\r\n' "$cookie" "$1" >&3
+  timeout 10 cat <&3 2>/dev/null
+  exec 3>&- 2>/dev/null
+  return 0
+}
+
+newnym(){ tor_ctl 'SIGNAL NEWNYM' | grep -q '250 OK'; }
+
+# 0-100, empty if the control port is not answering
+tor_bootstrap_pct(){
+  tor_ctl 'GETINFO status/bootstrap-phase' 2>/dev/null \
+    | grep -o 'PROGRESS=[0-9]*' | head -1 | cut -d= -f2
+}
+
+tor_active(){ systemctl is-active --quiet tor@default || systemctl is-active --quiet tor; }
+
+tor_ports_up(){ ss -tln 2>/dev/null | grep -q '127.0.0.1:9040'; }
+
+# Restart Tor and wait for the transparent ports to come back.
+tor_restart(){
+  systemctl restart tor@default 2>/dev/null || systemctl restart tor 2>/dev/null
+  local i
+  for i in $(seq 1 30); do tor_ports_up && return 0; sleep 1; done
+  return 1
+}
+
+# Block until Tor reports Bootstrapped 100%. This is THE check that used to be
+# missing: port 9040 opens instantly, but until the bootstrap is done Tor has no
+# circuits — and a firewall lock applied at that moment kills all connectivity
+# while the link still shows "connected".
+wait_tor_bootstrap(){
+  local i pct last=""
+  for i in $(seq 1 60); do
+    pct=$(tor_bootstrap_pct)
+    [ "$pct" = "100" ] && { printf "\r\e[2K"; return 0; }
+    if [ -n "$pct" ] && [ "$pct" != "$last" ]; then
+      printf "\r\e[2K  ${C}•${N} Tor bootstrapping... ${Y}%s%%${N}" "$pct"; last="$pct"
+    fi
+    sleep 2
+  done
+  printf "\r\e[2K"
+  return 1
+}
+
+# Real end-to-end proof that Tor carries traffic (uses the SOCKS port directly,
+# so it works with or without the firewall lock). Retries: "Bootstrapped 100%"
+# only means directory info is in — the first *exit* circuit still needs a few
+# seconds, and a single probe there gives a false "Tor is dead".
+tor_works(){
+  local i
+  for i in 1 2 3 4 5; do
+    timeout 25 curl -s --socks5-hostname 127.0.0.1:9050 \
+      -o /dev/null https://check.torproject.org/api/ip 2>/dev/null && return 0
+    sleep 4
+  done
+  return 1
+}
+
+# same probe, but through the transparent redirect (validates the firewall path)
+trans_works(){
+  local i
+  for i in 1 2 3 4 5; do
+    timeout 25 curl -s -o /dev/null https://check.torproject.org/api/ip 2>/dev/null && return 0
+    sleep 4
+  done
+  return 1
+}
+
+# ---------------- MAC randomize ----------------
+# NetworkManager owns the MAC on managed devices: it re-applies the hardware
+# address on every (re)connect, so a macchanger spoof silently gets reverted.
+# On NM-managed links we therefore drive NM's own cloned-mac-address instead.
+nm_conn(){ nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null \
+             | awk -F: -v d="$1" '$2==d{print $1; exit}'; }
+
+nm_managed(){
+  systemctl is-active --quiet NetworkManager || return 1
+  nmcli -t -f DEVICE,STATE device status 2>/dev/null \
+    | awk -F: -v d="$1" '$1==d && $2!="unmanaged"{f=1} END{exit !f}'
+}
+
+# set cloned MAC on a *profile* (works even if the profile is not active)
+nm_setmac_conn(){
+  local mode="$1" conn="$2" key
+  [ -z "$conn" ] && return 1
+  case "$(nmcli -t -f connection.type connection show "$conn" 2>/dev/null | cut -d: -f2)" in
+    802-11-wireless) key=wifi.cloned-mac-address ;;
+    *)               key=ethernet.cloned-mac-address ;;
+  esac
+  nmcli connection modify "$conn" "$key" "$mode" >/dev/null 2>&1
+}
+
+# set NM cloned MAC to "random" (spoof) or "permanent" (restore) on device $2
+nm_setmac(){
+  local mode="$1" dev="$2" conn
+  conn=$(nm_conn "$dev"); [ -z "$conn" ] && return 1
+  nm_setmac_conn "$mode" "$conn" || return 1
+  mkdir -p "$STATE" 2>/dev/null
+  grep -qxF "$conn" "$STATE/nm_conns" 2>/dev/null || echo "$conn" >> "$STATE/nm_conns" 2>/dev/null
+  nmcli connection up "$conn" >/dev/null 2>&1
+  return 0
+}
+
+# $1 = random|permanent — applied to EVERY active interface, not just the primary
+setmac_all(){
+  local mode="$1" dev devs
+  devs=$(active_ifaces); [ -z "$devs" ] && devs="$IFACE"
+  for dev in $devs; do
+    if nm_managed "$dev"; then
+      nm_setmac "$mode" "$dev"
+    else
+      ip link set "$dev" down 2>/dev/null
+      [ "$mode" = random ] && macchanger -r "$dev" >/dev/null 2>&1 \
+                           || macchanger -p "$dev" >/dev/null 2>&1
+      ip link set "$dev" up 2>/dev/null
+    fi
+  done
+  net_settle
+  IFACE=$(detect_iface)   # primary may have changed while links bounced
+}
+
+randmac(){ setmac_all random; }
+
+# Restore the real MAC everywhere — including profiles we spoofed in an earlier
+# run that are not connected right now (wifi you have since disconnected from
+# would otherwise keep cloned-mac-address=random forever).
+restore_mac(){
+  setmac_all permanent
+  if [ -f "$STATE/nm_conns" ]; then
+    local conn
+    while IFS= read -r conn; do
+      [ -n "$conn" ] && nm_setmac_conn permanent "$conn"
+    done < "$STATE/nm_conns"
+  fi
+  # anything else NM still has pinned to random
+  nmcli -t -f NAME connection show 2>/dev/null | while IFS= read -r conn; do
+    nmcli -t -f 802-11-wireless.cloned-mac-address,802-3-ethernet.cloned-mac-address \
+          connection show "$conn" 2>/dev/null | grep -q ':random$' \
+      && nm_setmac_conn permanent "$conn"
+  done
+}
+
+# Wait until the link is really usable again (default route AND the gateway
+# answers), not just until a route appears — DHCP needs a moment after a MAC
+# change and Tor must not be started into a half-up link.
+net_settle(){
+  local i gw
+  for i in $(seq 1 25); do
+    gw=$(ip route show default 2>/dev/null | awk '/default/{print $3; exit}')
+    if [ -n "$gw" ] && timeout 2 ping -c1 -W1 "$gw" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+# ---------------- firewall lockdown (the anti-leak core) ----------------
+apply_firewall(){
+  # ---- IPv4 nat: redirect everything into Tor ----
+  iptables -t nat -F OUTPUT
+  iptables -t nat -A OUTPUT -m owner --uid-owner "$TOR_UID" -j RETURN
+  # NOTE: no blanket "-o lo RETURN" here — resolv.conf points at 127.0.0.1, so
+  # the DNS redirect below MUST still see loopback traffic. Plain loopback TCP
+  # is already spared by the 127.0.0.0/8 RETURN further down.
+  iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-ports 5353
+  iptables -t nat -A OUTPUT -p tcp --dport 53 -j REDIRECT --to-ports 5353
+  iptables -t nat -A OUTPUT -p tcp -d 10.192.0.0/10 -j REDIRECT --to-ports 9040
+  local n
+  for n in $NON_TOR; do iptables -t nat -A OUTPUT -d "$n" -j RETURN; done
+  iptables -t nat -A OUTPUT -p tcp --syn -j REDIRECT --to-ports 9040
+
+  # ---- IPv4 filter: DROP anything that is not Tor ----
+  iptables -F OUTPUT
+  iptables -F INPUT
+  iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+  iptables -A OUTPUT -m owner --uid-owner "$TOR_UID" -j ACCEPT
+  iptables -A OUTPUT -o lo -j ACCEPT
+  # DHCP must stay alive, otherwise the lease expires under the lock and the
+  # link stays "connected" with no address — looks exactly like a dead network.
+  iptables -A OUTPUT -p udp --sport 68 --dport 67 -j ACCEPT
+  iptables -A OUTPUT -d 255.255.255.255 -j ACCEPT
+  iptables -A OUTPUT -d 224.0.0.0/4 -j ACCEPT
+  for n in $NON_TOR; do iptables -A OUTPUT -d "$n" -j ACCEPT; done
+  iptables -A OUTPUT -p tcp --dport 9040 -j ACCEPT
+  iptables -A OUTPUT -p udp --dport 5353 -j ACCEPT
+  iptables -A OUTPUT -p tcp --dport 5353 -j ACCEPT
+  iptables -A OUTPUT -j REJECT          # <-- guarantees: no Tor = no traffic
+
+  iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+  iptables -A INPUT -i lo -j ACCEPT
+  iptables -A INPUT -p udp --sport 67 --dport 68 -j ACCEPT
+
+  # ---- IPv6: kill it entirely (Tor transparent proxy is IPv4-only) ----
+  ip6tables -F
+  ip6tables -P INPUT  DROP
+  ip6tables -P OUTPUT DROP
+  ip6tables -P FORWARD DROP
+  ip6tables -A INPUT  -i lo -j ACCEPT
+  ip6tables -A OUTPUT -o lo -j ACCEPT
+}
+
+firewall_locked(){ iptables -C OUTPUT -j REJECT 2>/dev/null; }
+
+restore_firewall(){
+  iptables -F
+  iptables -t nat -F OUTPUT
+  iptables -P INPUT ACCEPT
+  iptables -P OUTPUT ACCEPT
+  iptables -P FORWARD ACCEPT
+  ip6tables -F
+  ip6tables -P INPUT ACCEPT
+  ip6tables -P OUTPUT ACCEPT
+  ip6tables -P FORWARD ACCEPT
+}
+
+# ---------------- helpers ----------------
+# MAC readers. ip/ethtool are the reliable source (macchanger's permanent-MAC
+# read is the one that quietly returns garbage when it can't do the ioctl).
+mac_cur(){  ip -br link show "$1" 2>/dev/null | awk '{print $3}'; }
+mac_perm(){
+  local p
+  p=$(ethtool -P "$1" 2>/dev/null | awk '{print $NF}')
+  case "$p" in ""|"00:00:00:00:00:00") p=$(macchanger -s "$1" 2>/dev/null | awk '/Permanent MAC/{print $3}') ;; esac
+  echo "$p"
+}
+cur_mac(){  mac_cur  "$IFACE"; }
+perm_mac(){ mac_perm "$IFACE"; }
+exit_ip(){ timeout 20 curl -s https://check.torproject.org/api/ip 2>/dev/null; }
+
+# just the address. Retries: right after NEWNYM the fresh circuit needs a moment,
+# and a single failed probe used to print an empty IP.
+exit_ip_addr(){
+  local i out
+  for i in 1 2 3 4 5; do
+    out=$(exit_ip | sed -n 's/.*"IP":"\([^"]*\)".*/\1/p')
+    [ -n "$out" ] && { echo "$out"; return 0; }
+    sleep 3
+  done
+  return 1
+}
+
+# NM/resolvconf like to rewrite resolv.conf; freeze it while we own DNS
+lock_dns(){   chattr +i /etc/resolv.conf 2>/dev/null; }
+unlock_dns(){ chattr -i /etc/resolv.conf 2>/dev/null; }
+
+restore_dns(){
+  unlock_dns
+  if [ -s "$STATE/resolv.conf.bak" ]; then
+    cp -f "$STATE/resolv.conf.bak" /etc/resolv.conf 2>/dev/null
+  fi
+  systemctl is-active --quiet NetworkManager && \
+    nmcli device reapply "$IFACE" >/dev/null 2>&1
+}
+
+# A crashed/killed run used to leave resolv.conf immutable at 127.0.0.1 with no
+# Tor listening: everything "connected", nothing resolves. Detect and undo it.
+resolv_stuck(){
+  grep -q '^nameserver 127.0.0.1' /etc/resolv.conf 2>/dev/null || return 1
+  ss -uln 2>/dev/null | grep -q '127.0.0.1:5353' && return 1
+  return 0
+}
+
+# never leave the box locked out if start() dies half-way
+trap 'rc=$?; [ "$ANONX_ARMED" = 1 ] && [ $rc -ne 0 ] && { unlock_dns; restore_firewall; }; exit $rc' EXIT
+
+# ================= commands =================
+start(){
+  need_root start
+  [ -z "$TOR_UID" ] && { echo "${R}tor user '$TOR_USER' not found — is tor installed?${N}"; exit 1; }
+  mkdir -p "$STATE"
+  ANONX_ARMED=1
+
+  echo "${W}${BOLD}  anonx — going anonymous...${N}"; line
+
+  # save original firewall + MAC + DNS once
+  [ -f "$STATE/iptables.bak" ]  || iptables-save  > "$STATE/iptables.bak"  2>/dev/null
+  [ -f "$STATE/ip6tables.bak" ] || ip6tables-save > "$STATE/ip6tables.bak" 2>/dev/null
+  perm_mac > "$STATE/orig_mac" 2>/dev/null
+  unlock_dns
+  [ -f "$STATE/resolv.conf.bak" ] || cp -f /etc/resolv.conf "$STATE/resolv.conf.bak" 2>/dev/null
+
+  # 1) MAC FIRST — changing it bounces the link, which tears down every TCP
+  #    connection Tor holds. Doing it after Tor started (the old order) left Tor
+  #    circuit-less behind a firewall that forces all traffic into Tor.
+  info "randomizing MAC (before Tor, link will bounce)..."
+  randmac
+  if ip route show default | grep -q . && [ "$(cur_mac)" != "$(perm_mac)" ]; then
+    ok "MAC randomized → $(cur_mac)"
+  elif ip route show default | grep -q .; then
+    bad "MAC unchanged (driver/NM refused spoof) — link still up"
+  else
+    bad "MAC change dropped connectivity — reverting MAC"
+    restore_mac
+  fi
+  net_settle || { bad "no usable link after MAC change — aborting (nothing locked)"; ANONX_ARMED=0; exit 1; }
+  ok "link back up (gateway reachable)"
+
+  # 2) tor up with transparent-proxy config, on the settled link
+  info "starting Tor..."
+  tor_restart || { bad "Tor failed to start"; ANONX_ARMED=0; exit 1; }
+  ok "Tor transparent ports up (9040/5353/9051)"
+
+  if wait_tor_bootstrap; then
+    ok "Tor bootstrapped 100% (circuits ready)"
+  else
+    bad "Tor could not bootstrap (no circuits) — NOT locking the firewall"
+    info "your network is untouched; check 'sudo anonx doctor'"
+    ANONX_ARMED=0; exit 1
+  fi
+
+  if tor_works; then
+    ok "Tor carries traffic (verified through SOCKS)"
+  else
+    bad "Tor is up but no traffic passes — NOT locking the firewall"
+    ANONX_ARMED=0; exit 1
+  fi
+
+  # 3) firewall lockdown
+  info "locking firewall (all traffic → Tor, IPv6 blocked, DHCP allowed)..."
+  apply_firewall
+  ok "firewall active — non-Tor traffic is DROPPED"
+
+  # 4) DNS → localhost (Tor). iptables already forces :53 → Tor DNSPort
+  printf 'nameserver 127.0.0.1\noptions edns0\n' > /etc/resolv.conf 2>/dev/null \
+    && { lock_dns; ok "DNS pinned to Tor (resolv.conf locked against rewrites)"; }
+
+  # 5) prove the locked-down path really works, else roll everything back
+  info "verifying transparent path..."
+  if trans_works; then
+    ok "transparent proxy verified — internet works through Tor"
+  else
+    bad "no traffic through the lock — rolling back to normal networking"
+    # say WHICH layer failed before tearing the evidence down
+    if timeout 15 dig +short +time=5 +tries=1 example.com @127.0.0.1 -p 5353 >/dev/null 2>&1; then
+      info "DNS through Tor: ${G}ok${N} — so the TCP redirect is the problem"
+    else
+      info "DNS through Tor: ${R}failed${N} — Tor's DNSPort did not answer"
+    fi
+    if timeout 25 curl -s -o /dev/null "https://1.1.1.1" 2>/dev/null; then
+      info "TCP through Tor: ${G}ok${N} (raw IP works, name resolution is the problem)"
+    else
+      info "TCP through Tor: ${R}failed${N} (nothing reaches the exit node)"
+    fi
+    unlock_dns; restore_dns; restore_firewall
+    ANONX_ARMED=0; exit 1
+  fi
+
+  # 6) rotation daemon — fresh log, so `status` never shows a stale "last change"
+  : > "$STATE/rotate.log" 2>/dev/null
+  start_rotator
+  ok "IP rotation every ${Y}$(human_dur "$INTERVAL")${N} started (pid $(cat "$STATE/rotator.pid"))"
+
+  ANONX_ARMED=0
+  line
+  sleep 2
+  status
+}
+
+rotator(){
+  local fails=0 nip
+  while true; do
+    sleep "$INTERVAL"
+    if [ "$ROTATE_MAC_EACH_CYCLE" -eq 1 ]; then
+      randmac
+      tor_restart && wait_tor_bootstrap    # link bounced → Tor needs new circuits
+    fi
+    newnym
+    nip=$(exit_ip_addr)
+    if [ -n "$nip" ]; then
+      fails=0
+      echo "$(date '+%F %T')  rotated -> $nip" >> "$STATE/rotate.log"
+    else
+      fails=$((fails+1))
+      echo "$(date '+%F %T')  rotated -> unreachable (fail $fails)" >> "$STATE/rotate.log"
+      # Tor sometimes never recovers from a link change on its own; after two
+      # dead cycles restart it instead of leaving the box with no internet.
+      if [ "$fails" -ge 2 ]; then
+        echo "$(date '+%F %T')  tor stuck — restarting" >> "$STATE/rotate.log"
+        tor_restart && wait_tor_bootstrap && fails=0
+      fi
+    fi
+  done
+}
+
+# validate + persist the rotation interval
+set_interval(){
+  local secs
+  secs=$(parse_dur "$1") || {
+    echo "${R}bad interval '$1'${N} — use e.g. ${G}10s${N}, ${G}90s${N}, ${G}2m${N}, ${G}1h${N}"; exit 1; }
+  if [ "$secs" -lt "$MIN_INTERVAL" ]; then
+    warn "minimum is ${MIN_INTERVAL}s (Tor rate-limits NEWNYM) — using ${MIN_INTERVAL}s"
+    secs=$MIN_INTERVAL
+  fi
+  mkdir -p "$STATE" 2>/dev/null
+  echo "$secs" > "$STATE/interval"
+  INTERVAL="$secs"
+}
+
+start_rotator(){
+  stop_rotator >/dev/null 2>&1
+  ( rotator ) >/dev/null 2>&1 &
+  echo $! > "$STATE/rotator.pid"
+}
+
+rotator_alive(){ [ -f "$STATE/rotator.pid" ] && kill -0 "$(cat "$STATE/rotator.pid")" 2>/dev/null; }
+
+# `anonx interval` shows it, `anonx interval 45s` sets it (live if running)
+interval_cmd(){
+  need_root interval
+  if [ -z "$1" ]; then
+    echo "  rotation interval: ${Y}$(human_dur "$INTERVAL")${N}   ${D}(change: sudo anonx interval 45s)${N}"
+    return 0
+  fi
+  set_interval "$1"
+  ok "rotation interval set to ${Y}$(human_dur "$INTERVAL")${N} ${D}(saved, used on every start)${N}"
+  if rotator_alive; then
+    start_rotator
+    ok "running rotator restarted with the new interval (pid $(cat "$STATE/rotator.pid"))"
+  fi
+}
+
+stop_rotator(){
+  [ -f "$STATE/rotator.pid" ] && kill "$(cat "$STATE/rotator.pid")" 2>/dev/null
+  rm -f "$STATE/rotator.pid"
+}
+
+stop(){
+  need_root stop
+  echo "${W}${BOLD}  anonx — restoring normal networking...${N}"; line
+  stop_rotator; ok "rotation stopped"
+  restore_firewall; ok "firewall restored (IPv4 + IPv6 open)"
+  restore_dns; ok "DNS restored (resolv.conf unlocked)"
+  restore_mac
+  ok "MAC restored → $(cur_mac)"
+  # anonx started the service, so anonx shuts it down again — otherwise `status`
+  # keeps reporting "Tor service: running" long after you went back to normal.
+  # (Tor Browser is unaffected: it runs its own tor on 9150.)
+  if tor_active; then
+    systemctl stop tor@default 2>/dev/null || systemctl stop tor 2>/dev/null
+    tor_active && warn "Tor service still running (stop it: sudo systemctl stop tor@default)" \
+                || ok "Tor service stopped"
+  fi
+  net_settle && ok "link up (gateway reachable)" || warn "link not settled yet — give NM a few seconds"
+  line
+  echo "  ${Y}You are now on your REAL identity again.${N}"
+}
+
+# Force-restore even when state is half-broken (killed mid-run, rebooted while
+# locked, resolv.conf stuck immutable, etc.)
+repair(){
+  need_root repair
+  echo "${W}${BOLD}  anonx — repairing network state...${N}"; line
+  stop_rotator
+  unlock_dns; ok "resolv.conf unlocked"
+  restore_firewall; ok "iptables + ip6tables flushed to ACCEPT"
+  restore_dns; ok "DNS handed back to NetworkManager"
+  restore_mac; ok "MAC set back to permanent on all profiles"
+  # same end state as `stop`: Tor off, so `status` doesn't say "running" while
+  # anonx is clearly off
+  if tor_active; then
+    systemctl stop tor@default 2>/dev/null || systemctl stop tor 2>/dev/null
+    ok "Tor service stopped"
+  fi
+  systemctl restart NetworkManager >/dev/null 2>&1
+  net_settle && ok "gateway reachable" || bad "still no gateway — check the cable/wifi"
+  line
+  doctor
+}
+
+# one status line: icon, label, value — all rows share the same two columns
+row(){ printf "  %s  ${W}%-11s${N} %s\n" "$1" "$2" "$3"; }
+YES="${G}✔${N}"; NO="${R}✘${N}"; DOT="${D}•${N}"; HM="${Y}!${N}"
+
+status(){
+  local locked=0 tor_json is_tor rip pct dev cm pm dns last
+  firewall_locked && locked=1
+  tor_json=$(exit_ip)
+  is_tor=$(echo "$tor_json" | grep -o '"IsTor":[a-z]*' | cut -d: -f2)
+  rip=$(echo "$tor_json"    | grep -o '"IP":"[^"]*"'  | cut -d'"' -f4)
+  pct=$(tor_bootstrap_pct)
+  dns=$(grep -m1 nameserver /etc/resolv.conf 2>/dev/null | awk '{print $2}')
+
+  # ---- headline: one word that says what is going on ----
+  echo
+  if [ "$locked" -eq 1 ] && [ "$is_tor" = "true" ]; then
+    printf "  ${CHIP_ON} ANONYMOUS ${N}  ${D}everything on this machine leaves through Tor${N}\n"
+  elif [ "$locked" -eq 1 ]; then
+    printf "  ${CHIP_BAD} NOT WORKING ${N}  ${R}locked, but traffic is not reaching Tor${N}\n"
+    printf "  ${D}fix it:${N} ${G}sudo anonx doctor${N}  ${D}or${N}  ${G}sudo anonx repair${N} ${D}(gets your network back)${N}\n"
+  else
+    printf "  ${CHIP_OFF} OFF ${N}  ${D}you are on your real identity — nothing is hidden${N}\n"
+  fi
+  line
+
+  # ---- Tor ----
+  if tor_active && [ "$pct" = "100" ]; then
+    row "$YES" "Tor"      "${G}running${N} ${D}· fully connected to the Tor network${N}"
+  elif tor_active && [ -n "$pct" ]; then
+    row "$NO"  "Tor"      "${Y}starting — only ${pct}% ready${N} ${D}· no circuits yet, wait a moment${N}"
+  elif tor_active; then
+    row "$HM"  "Tor"      "${Y}running${N} ${D}· cannot read progress (control port silent)${N}"
+  elif [ "$locked" -eq 1 ]; then
+    row "$NO"  "Tor"      "${R}stopped while the firewall is still locked${N} ${D}· sudo anonx repair${N}"
+  else
+    row "$DOT" "Tor"      "${D}stopped${N}"
+  fi
+
+  # ---- firewall ----
+  if [ "$locked" -eq 1 ]; then
+    row "$YES" "Firewall" "${G}locked${N} ${D}· anything not going through Tor is blocked${N}"
+  else
+    row "$DOT" "Firewall" "${D}off · normal networking, apps connect directly${N}"
+  fi
+
+  # ---- what the world sees ----
+  if [ "$is_tor" = "true" ]; then
+    row "$YES" "Public IP" "${Y}${BOLD}${rip}${N} ${D}· a Tor exit node, not you${N}"
+  elif [ -z "$tor_json" ]; then
+    row "$NO"  "Public IP" "${R}no internet right now${N} ${D}· sudo anonx doctor${N}"
+  elif [ "$locked" -eq 1 ]; then
+    row "$NO"  "Public IP" "${R}${rip}${N} ${D}· this is YOUR real IP — Tor is not carrying traffic${N}"
+  else
+    row "$DOT" "Public IP" "${W}${rip:-unknown}${N} ${D}· your real IP, visible to every site${N}"
+  fi
+
+  # ---- MAC per link ----
+  for dev in $(active_ifaces); do
+    cm=$(mac_cur "$dev"); pm=$(mac_perm "$dev")
+    if [ "$dev" = "$IFACE" ]; then
+      last="${D}· your internet goes out through this link${N}"
+    else
+      last="${D}· connected, but not carrying your internet${N}"
+    fi
+    if [ -n "$cm" ] && [ -n "$pm" ] && [ "$cm" != "$pm" ]; then
+      row "$YES" "MAC $dev" "${M}$cm${N} ${G}fake${N} ${D}(real $pm)${N}"
+    elif [ -z "$pm" ]; then
+      row "$HM"  "MAC $dev" "${Y}${cm:-?}${N} ${D}(cannot read the real one)${N}"
+    else
+      row "$DOT" "MAC $dev" "${W}${cm:-?}${N} ${D}real hardware address, not changed${N}"
+    fi
+    printf "  %s  ${W}%-11s${N} %s\n" " " "" "$last"
+  done
+
+  # ---- IPv6 ----
+  if ip6tables -L OUTPUT -n 2>/dev/null | head -1 | grep -q DROP; then
+    row "$YES" "IPv6"     "${G}blocked${N} ${D}· Tor is IPv4-only, so v6 would expose you${N}"
+  elif [ "$locked" -eq 1 ]; then
+    row "$NO"  "IPv6"     "${R}open while locked${N} ${D}· sudo anonx restart${N}"
+  else
+    row "$DOT" "IPv6"     "${D}open · normal${N}"
+  fi
+
+  # ---- DNS ----
+  if [ "$dns" = "127.0.0.1" ] && ss -uln 2>/dev/null | grep -q '127.0.0.1:5353'; then
+    row "$YES" "DNS"      "${G}inside Tor${N} ${D}· your ISP cannot see the sites you look up${N}"
+  elif [ "$dns" = "127.0.0.1" ]; then
+    row "$NO"  "DNS"      "${R}pointed at Tor, but Tor is not listening${N} ${D}· sudo anonx repair${N}"
+  else
+    row "$DOT" "DNS"      "${W}${dns:-?}${N} ${D}· your router/ISP resolver${N}"
+  fi
+
+  # ---- rotation ----
+  if rotator_alive; then
+    row "$YES" "New IP"   "${G}automatic${N} ${D}· every${N} ${Y}$(human_dur "$INTERVAL")${N}"
+    if [ -f "$STATE/rotate.log" ]; then
+      last=$(tail -1 "$STATE/rotate.log")
+      [ -n "$last" ] && printf "  %s  ${W}%-11s${N} ${D}last change: %s${N}\n" " " "" "$last"
+    fi
+  else
+    row "$DOT" "New IP"   "${D}off · will change every $(human_dur "$INTERVAL") once started${N}"
+  fi
+
+  line
+  if [ "$locked" -eq 1 ]; then
+    printf "  ${D}go back to normal:${N}  ${G}sudo anonx stop${N}\n"
+  else
+    printf "  ${D}go anonymous:${N}  ${G}sudo anonx start${N}   ${D}(add a time, e.g.${N} ${G}sudo anonx start 30s${N}${D})${N}\n"
+  fi
+  sig
+}
+
+# ---------------- doctor: where exactly is the network dying ----------------
+doctor(){
+  local gw pct
+  echo "${W}${BOLD}  anonx doctor — layer by layer${N}"; line
+
+  # L2/L3
+  gw=$(ip route show default 2>/dev/null | awk '/default/{print $3; exit}')
+  if [ -n "$gw" ]; then ok "default route:      via $gw dev $IFACE"
+  else bad "default route:      ${R}NONE${N} (link down / no DHCP lease)"; fi
+
+  if [ -n "$gw" ] && timeout 3 ping -c1 -W2 "$gw" >/dev/null 2>&1; then
+    ok "gateway ping:       reachable"
+  else
+    bad "gateway ping:       ${R}dead${N} — LAN itself is broken (MAC/DHCP)"
+  fi
+
+  # raw internet (only meaningful when NOT locked, ICMP never goes over Tor)
+  if firewall_locked; then
+    info "raw internet ping:  ${D}skipped (locked — ICMP can't use Tor, that's normal)${N}"
+  elif timeout 6 ping -c1 -W3 1.1.1.1 >/dev/null 2>&1; then
+    ok "raw internet:       reachable"
+  else
+    bad "raw internet:       ${R}unreachable${N} — ISP/router problem, not anonx"
+  fi
+
+  # tor
+  pct=$(tor_bootstrap_pct)
+  if tor_active; then ok "tor service:        active"
+  elif firewall_locked; then bad "tor service:        ${R}inactive while locked${N}"
+  else info "tor service:        ${D}inactive (anonx off — normal)${N}"; fi
+  if ! tor_active && ! firewall_locked; then
+    info "tor checks:         ${D}skipped — Tor is off, start it with 'sudo anonx start'${N}"
+  else
+    tor_ports_up && ok "tor ports:          9040/5353 open" || bad "tor ports:          ${R}closed${N}"
+    if [ "$pct" = "100" ]; then ok "tor bootstrap:      100%"
+    else bad "tor bootstrap:      ${R}${pct:-no answer}${N} — no circuits, nothing can pass"; fi
+
+    tor_works && ok "tor SOCKS fetch:    works" \
+              || bad "tor SOCKS fetch:    ${R}fails${N} — restart tor: sudo anonx restart"
+  fi
+
+  # dns
+  if timeout 8 getent hosts example.com >/dev/null 2>&1; then
+    ok "DNS resolution:     works ($(grep -m1 nameserver /etc/resolv.conf | awk '{print $2}'))"
+  else
+    bad "DNS resolution:     ${R}fails${N}"
+    resolv_stuck && info "  resolv.conf points at 127.0.0.1 but Tor DNSPort is down → sudo anonx repair"
+  fi
+  lsattr /etc/resolv.conf 2>/dev/null | grep -q 'i' \
+    && info "resolv.conf:        ${Y}immutable (locked by anonx)${N}"
+
+  # http
+  if timeout 40 curl -s -o /dev/null -w '' https://check.torproject.org/api/ip 2>/dev/null; then
+    ok "HTTPS fetch:        works"
+  else
+    bad "HTTPS fetch:        ${R}fails${N}"
+  fi
+  line
+}
+
+ip_rotate(){
+  need_root ip
+  local before after
+  before=$(exit_ip_addr)
+  echo "${C}Rotating exit IP...${N}  ${D}(was ${before:-?})${N}"
+  newnym || { bad "Tor control port refused NEWNYM"; return 1; }
+  sleep 5
+  after=$(exit_ip_addr)
+  if [ -z "$after" ]; then
+    bad "could not reach Tor after rotation"
+  elif [ "$after" = "$before" ]; then
+    printf "  ${Y}•${N} exit IP still ${Y}${BOLD}%s${N} ${D}(Tor reused the circuit — try again)${N}\n" "$after"
+  else
+    printf "  ${G}✔${N} new exit IP: ${Y}${BOLD}%s${N}\n" "$after"
+  fi
+}
+
+mac_rotate(){
+  need_root mac
+  echo "${C}Randomizing MAC...${N}"
+  randmac
+  local dev
+  for dev in $(active_ifaces); do
+    printf "  ${M}%-6s${N} → %s\n" "$dev" "$(macchanger -s "$dev" 2>/dev/null | awk '/Current MAC/{print $3}')"
+  done
+  # The link just bounced: Tor's guard connections are gone and it does not
+  # always rebuild them by itself. Restart it so the tunnel comes back.
+  if tor_active; then
+    info "link bounced — rebuilding Tor circuits..."
+    if tor_restart && wait_tor_bootstrap; then
+      ok "Tor bootstrapped 100% again"
+    else
+      bad "Tor did not come back — network would be dead behind the lock"
+      if firewall_locked; then
+        warn "unlocking firewall so you keep internet (you are NOT anonymous now)"
+        unlock_dns; restore_dns; restore_firewall
+      fi
+    fi
+  fi
+}
+
+# ---------------- self update ----------------
+# Where a manual install pulls new versions from. Override in /etc/anonx.conf
+# (UPDATE_URL=...) or with ANONX_UPDATE_URL= in the environment.
+UPDATE_URL="${ANONX_UPDATE_URL:-https://raw.githubusercontent.com/sid-hack3r/anonx/main/anonx}"
+[ -r /etc/anonx.conf ] && . /etc/anonx.conf 2>/dev/null
+
+# was this copy installed by apt/dpkg?
+from_apt(){ dpkg -S "$(readlink -f "$0")" >/dev/null 2>&1; }
+
+update(){
+  need_root update
+  local self remote_ver tmp
+  self=$(readlink -f "$0")
+
+  # installed as a package -> let apt do it, mixing the two would be a mess
+  if from_apt; then
+    local out newv
+    info "installed with apt — checking for a newer package"
+    apt-get update -qq 2>/dev/null
+    out=$(apt-get install -y --only-upgrade anonx 2>&1)
+    case "$out" in
+      *"already the newest"*)
+        ok "already up to date (${W}v$VERSION${N})" ;;
+      *"Unable to locate package"*)
+        warn "no apt source on this machine provides anonx"
+        info "add the repository, then run this again:"
+        info "  ${G}echo 'deb [trusted=yes] https://<user>.github.io/anonx ./' | sudo tee /etc/apt/sources.list.d/anonx.list${N}" ;;
+      *)
+        newv=$(dpkg-query -W -f='${Version}' anonx 2>/dev/null)
+        ok "updated to ${G}v${newv:-?}${N}" ;;
+    esac
+    return 0
+  fi
+
+  info "checking $UPDATE_URL"
+  tmp=$(mktemp /tmp/anonx.XXXXXX) || return 1
+  if ! timeout 60 curl -fsSL "$UPDATE_URL" -o "$tmp" 2>/dev/null; then
+    rm -f "$tmp"; bad "could not download (no internet, or the URL is wrong)"
+    info "set your own with: ${G}echo 'UPDATE_URL=https://.../anonx' | sudo tee /etc/anonx.conf${N}"
+    return 1
+  fi
+
+  # sanity: must be a working anonx script, never install a 404 page
+  if ! head -1 "$tmp" | grep -q '^#!.*bash' || ! grep -q '^VERSION=' "$tmp" || ! bash -n "$tmp" 2>/dev/null; then
+    rm -f "$tmp"; bad "downloaded file is not a valid anonx script — nothing changed"; return 1
+  fi
+
+  remote_ver=$(grep -m1 '^VERSION=' "$tmp" | cut -d'"' -f2)
+  if [ "$remote_ver" = "$VERSION" ] && [ "$1" != "--force" ]; then
+    rm -f "$tmp"; ok "already up to date (${W}v$VERSION${N})"; return 0
+  fi
+
+  mkdir -p "$STATE"
+  cp -f "$self" "$STATE/anonx.prev" 2>/dev/null
+  install -m 755 "$tmp" "$self" && rm -f "$tmp" || { bad "install failed"; return 1; }
+  ok "updated ${W}v$VERSION${N} → ${G}v$remote_ver${N}  ${D}(old copy kept at $STATE/anonx.prev)${N}"
+  if firewall_locked; then
+    info "anonx is running — apply the new version with: ${G}sudo anonx restart${N}"
+  fi
+}
+
+# ---------------- boot persistence ----------------
+UNIT=/etc/systemd/system/anonx.service
+
+enable_boot(){
+  need_root enable
+  cat > "$UNIT" <<'EOF'
+[Unit]
+Description=anonx — transparent Tor anonymizer
+After=network-online.target NetworkManager.service tor.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/anonx start
+ExecStop=/usr/local/bin/anonx stop
+ExecStopPost=/usr/local/bin/anonx repair
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable anonx.service >/dev/null 2>&1 \
+    && ok "anonx will now start automatically on every boot" \
+    || bad "could not enable service"
+  info "turn it off with:  sudo anonx disable"
+}
+
+disable_boot(){
+  need_root disable
+  systemctl disable anonx.service >/dev/null 2>&1
+  rm -f "$UNIT"; systemctl daemon-reload
+  ok "boot autostart removed (anonx stays manual)"
+}
+
+usage(){
+  banner
+  printf "  ${W}WHAT IT DOES${N}\n"
+  printf "    One command puts every program on this machine behind Tor — browser,\n"
+  printf "    terminal, apt, scripts. Your IP, your DNS lookups and your MAC address\n"
+  printf "    are all hidden, and the exit IP changes on a timer.\n\n"
+
+  printf "  ${W}EVERYDAY USE${N}\n"
+  printf "    ${G}sudo anonx start${N} ${D}[time]${N}     go anonymous  ${D}(time = how often the IP changes)${N}\n"
+  printf "    ${G}sudo anonx stop${N}             back to normal, Tor shut down\n"
+  printf "    ${G}sudo anonx status${N}           are you anonymous right now?\n\n"
+
+  printf "  ${W}CHANGE IDENTITY${N}\n"
+  printf "    ${G}sudo anonx ip${N}               get a new exit IP immediately\n"
+  printf "    ${G}sudo anonx mac${N}              get a new MAC address immediately\n"
+  printf "    ${G}sudo anonx interval${N} ${D}<time>${N}  set how often the IP changes\n\n"
+
+  printf "  ${W}WHEN SOMETHING FEELS WRONG${N}\n"
+  printf "    ${G}sudo anonx doctor${N}           checks every layer and names what broke\n"
+  printf "    ${G}sudo anonx repair${N}           force everything back to a working network\n"
+  printf "    ${G}sudo anonx restart${N}          stop, then start again\n\n"
+
+  printf "  ${W}AUTOSTART${N}\n"
+  printf "    ${G}sudo anonx enable${N}           go anonymous automatically on every boot\n"
+  printf "    ${G}sudo anonx disable${N}          turn that off again\n\n"
+
+  printf "  ${W}KEEPING IT CURRENT${N}\n"
+  printf "    ${G}sudo anonx update${N}           fetch and install the latest version\n"
+  printf "    ${G}anonx version${N}               show which version this is\n\n"
+
+  printf "  ${W}TIME FORMAT${N}   ${D}(for start and interval)${N}\n"
+  printf "    ${Y}30s${N} seconds   ${Y}5m${N} minutes   ${Y}1h${N} hours   ${D}· minimum 10s, plain number = seconds${N}\n"
+  printf "    ${D}now set to:${N} ${Y}%s${N}\n\n" "$(human_dur "$INTERVAL")"
+
+  printf "  ${W}EXAMPLES${N}\n"
+  printf "    ${D}\$${N} sudo anonx start           ${D}# anonymous, new IP every %s${N}\n" "$(human_dur "$INTERVAL")"
+  printf "    ${D}\$${N} sudo anonx start 30s       ${D}# anonymous, new IP every 30 seconds${N}\n"
+  printf "    ${D}\$${N} sudo anonx interval 2m     ${D}# remember 2 minutes for next time${N}\n"
+  printf "    ${D}\$${N} curl https://check.torproject.org/api/ip   ${D}# should say IsTor:true${N}\n\n"
+
+  printf "  ${W}GOOD TO KNOW${N}\n"
+  printf "    ${D}·${N} ${Y}ping 8.8.8.8 stops working while you are anonymous${N} — Tor cannot carry\n"
+  printf "      ping. That is normal, not a fault. Websites still work.\n"
+  printf "    ${D}·${N} Video calls, games and VPNs use UDP, which Tor cannot carry either.\n"
+  printf "    ${D}·${N} Tor Browser is not affected — it runs its own Tor.\n"
+  printf "    ${D}·${N} Everything needs root, so always use ${G}sudo${N} ${D}(it asks by itself if you forget)${N}.\n"
+  printf "    ${D}·${N} Tor hides your IP, not your habits — logging into your own accounts\n"
+  printf "      still identifies you.\n\n"
+  sig
+  echo
+}
+
+# A previous run that died (kill -9, crash, reboot while locked) can leave
+# resolv.conf frozen at 127.0.0.1 with Tor down: everything looks connected and
+# nothing resolves. Warn about it on every invocation.
+if [ "$(id -u)" -eq 0 ] && resolv_stuck && [ "$1" != "start" ] && [ "$1" != "repair" ] && [ "$1" != "stop" ]; then
+  warn "leftover anonx DNS lock detected (resolv.conf → 127.0.0.1, Tor DNSPort down)"
+  info "fix it with:  ${G}sudo anonx repair${N}"
+fi
+
+# `anonx start 45s` / `anonx start --interval 2m` — one-off or new saved default
+case "$1" in
+  start|restart)
+    case "$2" in
+      -i|--interval) [ -n "$3" ] && set_interval "$3" ;;
+      ?*)            set_interval "$2" ;;
+    esac ;;
+esac
+
+case "$1" in
+  start)    start ;;
+  stop)     stop ;;
+  status)   status ;;
+  doctor)   doctor ;;
+  repair)   repair ;;
+  ip)       ip_rotate ;;
+  mac)      mac_rotate ;;
+  interval) interval_cmd "$2" ;;
+  update)   update "$2" ;;
+  help|--help|-h) usage ;;
+  restart)  stop; sleep 2; start ;;
+  enable)   enable_boot ;;
+  disable)  disable_boot ;;
+  version|--version|-v) banner ;;
+  *) usage ;;
+esac
