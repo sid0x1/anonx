@@ -72,11 +72,17 @@ cd anonx
 sudo ./install.sh
 ```
 
-The installer checks and pulls every dependency (`tor`, `macchanger`, `ethtool`,
-`iptables`, `curl`, `xxd`, `iproute2`), wires the transparent-proxy block into
-`/etc/tor/torrc` (with a `.pre-anonx` backup), and hands Tor's lifecycle to
-anonx. Remove it any time with `sudo ./uninstall.sh --purge` — it restores your
-network first, so you can never uninstall yourself into a locked firewall.
+The installer is careful: it first checks the machine can actually run anonx
+(Debian/Kali/Ubuntu + systemd + a working nat table) and **refuses to install
+where it wouldn't work**, then verifies and installs every dependency (`tor`,
+`macchanger`, `ethtool`, `iptables`, `curl`, `xxd`, `iproute2`), wires the
+transparent-proxy block into `/etc/tor/torrc`, and finishes with a **live smoke
+test** — it starts Tor, confirms the ports bind and the circuit builds, then
+stops it. If Tor can't come up on your box, the install aborts cleanly instead of
+leaving something broken.
+
+Remove it any time with `sudo ./uninstall.sh --purge` — it restores your network
+first, so you can never uninstall yourself into a locked firewall.
 
 <br>
 
@@ -159,6 +165,33 @@ path and **rolls back automatically** if it fails. A failed `start` always leave
 you with a working network.
 
 </details>
+
+<br>
+
+## 🛣️ Roadmap — coming in `v1.2`
+
+<sub>anonx today is a solid transparent-Tor gateway. Next it grows into a full anonymity cockpit.</sub>
+
+**🥇 Tier 1 — bigger shields**
+- `anonx leaktest` — one command that hammers DNS / IPv6 / WebRTC / transparent-proxy leaks and scores you
+- **Bridges & pluggable transports** (`obfs4`, `snowflake`) — reach Tor even where it's censored, with auto-fallback
+- **Choose your exit country** — `anonx exit de`, `anonx exit us` (`ExitNodes` + `StrictNodes`)
+- **Fail-closed at boot** — lock the firewall *before* the network is up, so even the startup window can't leak
+- `anonx panic` — instantly drop connections, restore identity and flush caches
+
+**🥈 Tier 2 — smaller fingerprint**
+- Randomized hostname + forced UTC timezone (two of the biggest fingerprint vectors)
+- **Stream isolation** — a separate Tor circuit per destination, so sites can't be correlated
+- Log & trace scrubbing — volatile journald, shell history off, swap off/encrypted
+- Vendor-preserving MAC option (some routers block unknown OUIs)
+
+**🥉 Tier 3 — polish & power**
+- `anonx watch` — a live TUI dashboard (IP · circuit · bandwidth · countdown)
+- **Whitelist mode** — keep the LAN printer / SSH reachable while everything else rides Tor
+- Desktop notification on every exit-IP change
+- Shell completion, a man page, and one-command `.onion` hosting
+
+<sub>Ideas or requests? Open an issue — the list is driven by what people actually need.</sub>
 
 <br>
 

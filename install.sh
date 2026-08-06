@@ -1,25 +1,57 @@
 #!/usr/bin/env bash
 #
 #  anonx installer
-#     sudo ./install.sh
+#     sudo ./install.sh            install (with a live smoke test)
+#     sudo ./install.sh --no-test  skip the Tor smoke test at the end
 #
 set -o pipefail
 
 R=$'\e[31m'; G=$'\e[32m'; Y=$'\e[33m'; C=$'\e[36m'; D=$'\e[2m'; W=$'\e[1;37m'; N=$'\e[0m'
-ok(){ printf "  ${G}✔${N} %s\n" "$1"; }
-bad(){ printf "  ${R}✘${N} %s\n" "$1"; }
+ok(){   printf "  ${G}✔${N} %s\n" "$1"; }
+bad(){  printf "  ${R}✘${N} %s\n" "$1"; }
+warn(){ printf "  ${Y}!${N} %s\n" "$1"; }
 info(){ printf "  ${C}•${N} %s\n" "$1"; }
+line(){ printf "${D}────────────────────────────────────────────────────────${N}\n"; }
+die(){  bad "$1"; echo; printf "  ${R}install aborted — nothing was changed on this system${N}\n"; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || { echo "${R}run as root:  sudo ./install.sh${N}"; exit 1; }
 
 SRC=$(cd "$(dirname "$0")" && pwd)
+RUN_TEST=1
+[ "$1" = "--no-test" ] && RUN_TEST=0
 
 echo "${W}  installing anonx${N}"
-printf "${D}────────────────────────────────────────────────────────${N}\n"
+line
 
-# ---------------- dependencies ----------------
-# every external command anonx calls, and the package that provides it.
-# "command:package:what it is needed for"
+# ================= 0) preflight: will anonx even work here? =================
+# anonx is built around Debian's tor packaging (the debian-tor user, the
+# tor@default systemd unit) and iptables. On a box without those it cannot
+# work, so we refuse up front instead of half-installing something broken.
+echo "  ${W}environment check${N}"
+
+if [ -r /etc/os-release ]; then
+  . /etc/os-release
+  info "system: ${W}${PRETTY_NAME:-unknown}${N}"
+fi
+
+command -v apt-get >/dev/null 2>&1 \
+  && ok "apt package manager present" \
+  || die "no apt-get — anonx targets Debian / Kali / Ubuntu. Unsupported here."
+
+if [ -d /run/systemd/system ]; then
+  ok "systemd is the init system"
+else
+  die "systemd not running — anonx drives Tor through 'systemctl' / tor@default. Unsupported here."
+fi
+
+case "$(uname -s)" in
+  Linux) ok "Linux kernel" ;;
+  *)     die "not Linux — anonx uses Linux iptables/netfilter" ;;
+esac
+echo
+
+# ================= 1) dependencies =================
+# command:package:why anonx needs it
 DEPS="
 tor:tor:the Tor daemon itself
 iptables:iptables:the transparent redirect and the kill switch
@@ -37,22 +69,20 @@ systemctl:systemd:starting and stopping the Tor service
 "
 
 echo "  ${W}dependency check${N}"
-missing=""; report=""
+missing=""
 while IFS=: read -r cmd pkg why; do
   [ -z "$cmd" ] && continue
   if command -v "$cmd" >/dev/null 2>&1; then
-    report="$report  ${G}✔${N} ${W}$(printf '%-11s' "$cmd")${N} ${D}$why${N}\n"
+    printf "  ${G}✔${N} ${W}%-11s${N} ${D}%s${N}\n" "$cmd" "$why"
   else
-    report="$report  ${Y}+${N} ${W}$(printf '%-11s' "$cmd")${N} ${D}$why${N} ${Y}(will install $pkg)${N}\n"
+    printf "  ${Y}+${N} ${W}%-11s${N} ${D}%s${N} ${Y}(will install %s)${N}\n" "$cmd" "$why" "$pkg"
     missing="$missing $pkg"
   fi
 done <<< "$DEPS"
-printf "$report"
 
-# NetworkManager is not required, but without it a MAC spoof gets reverted on
-# every reconnect, so anonx falls back to macchanger and warns
+# NetworkManager is optional (anonx falls back to macchanger without it)
 if command -v nmcli >/dev/null 2>&1; then
-  ok "$(printf '%-11s' nmcli) ${D}MAC spoofing that survives reconnects${N}"
+  printf "  ${G}✔${N} ${W}%-11s${N} ${D}MAC spoofing that survives reconnects${N}\n" nmcli
 else
   printf "  ${Y}!${N} ${W}%-11s${N} ${Y}not found${N} ${D}— MAC spoofing falls back to macchanger${N}\n" nmcli
 fi
@@ -61,45 +91,46 @@ missing=$(echo "$missing" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' |
 if [ -n "$missing" ]; then
   echo
   info "installing: ${Y}$missing${N}"
-  apt-get update -qq 2>/dev/null
-  apt-get install -y $missing >/dev/null 2>&1 || {
-    bad "apt could not install: $missing"
-    bad "install them by hand, then run this again"; exit 1; }
-
-  # trust nothing: check again that every command is now really there
+  apt-get update -qq 2>/dev/null || warn "apt-get update had warnings (continuing)"
+  if ! apt-get install -y $missing >/dev/null 2>&1; then
+    die "apt could not install: $missing — install them by hand, then re-run"
+  fi
+  # trust nothing: verify each command is actually callable now
   still=""
   while IFS=: read -r cmd pkg why; do
     [ -z "$cmd" ] && continue
     command -v "$cmd" >/dev/null 2>&1 || still="$still $cmd"
   done <<< "$DEPS"
-  [ -n "$still" ] && { bad "still missing after install:$still"; exit 1; }
-  ok "all dependencies installed"
+  [ -n "$still" ] && die "still missing after install:$still"
+  ok "all dependencies installed and callable"
 else
   ok "all dependencies already present"
 fi
-
-# ---------------- runtime sanity ----------------
-id debian-tor >/dev/null 2>&1 \
-  && ok "tor user 'debian-tor' exists ${D}(needed to exempt Tor from its own rules)${N}" \
-  || { bad "user 'debian-tor' missing — reinstall the tor package"; exit 1; }
-
-iptables -t nat -L OUTPUT -n >/dev/null 2>&1 \
-  && ok "iptables works ${D}(nat table reachable)${N}" \
-  || { bad "iptables cannot read the nat table — check your kernel/nftables setup"; exit 1; }
-
-[ -f /etc/tor/torrc ] \
-  && ok "found /etc/tor/torrc" \
-  || { bad "/etc/tor/torrc missing — reinstall the tor package"; exit 1; }
-
-pidof systemd >/dev/null 2>&1 \
-  && ok "systemd is running" \
-  || bad "systemd not detected — anonx controls Tor through systemctl"
 echo
 
-# ---------------- torrc ----------------
+# ================= 2) runtime prerequisites =================
+echo "  ${W}runtime check${N}"
+id debian-tor >/dev/null 2>&1 \
+  && ok "tor user 'debian-tor' exists" \
+  || die "user 'debian-tor' missing — the tor package did not set up correctly"
+
+iptables -t nat -L OUTPUT -n >/dev/null 2>&1 \
+  && ok "iptables nat table reachable" \
+  || die "iptables cannot use the nat table (kernel/nftables problem) — anonx can't redirect traffic here"
+
+ip6tables -L >/dev/null 2>&1 \
+  && ok "ip6tables usable (IPv6 can be blocked)" \
+  || warn "ip6tables not usable — IPv6 leak protection may not apply"
+
+[ -f /etc/tor/torrc ] \
+  && ok "/etc/tor/torrc present" \
+  || die "/etc/tor/torrc missing — reinstall the tor package"
+echo
+
+# ================= 3) configure tor =================
 TORRC=/etc/tor/torrc
 if grep -q "anonx transparent proxy" "$TORRC" 2>/dev/null; then
-  ok "torrc already configured"
+  ok "torrc already has the transparent-proxy block"
 else
   cp -f "$TORRC" "$TORRC.pre-anonx" 2>/dev/null
   cat >> "$TORRC" <<'EOF'
@@ -115,25 +146,66 @@ CookieAuthentication 1
 CookieAuthFileGroupReadable 1
 # --- end anonx ---
 EOF
-  ok "torrc updated (backup: $TORRC.pre-anonx)"
+  ok "torrc configured (backup at $TORRC.pre-anonx)"
+fi
+# tor must not autostart: anonx owns its lifecycle
+systemctl disable tor@default >/dev/null 2>&1
+systemctl disable tor         >/dev/null 2>&1
+
+# validate the tor config actually parses before we rely on it
+if tor --verify-config -f "$TORRC" >/dev/null 2>&1; then
+  ok "tor configuration verified"
+else
+  die "tor rejected the configuration — check $TORRC (restore $TORRC.pre-anonx)"
+fi
+echo
+
+# ================= 4) install the tool =================
+install -m 755 "$SRC/anonx" /usr/local/bin/anonx || die "could not install /usr/local/bin/anonx"
+ok "installed /usr/local/bin/anonx"
+# Some sudo configs ship secure_path without /usr/local/bin, so `sudo anonx`
+# would say "command not found". /usr/sbin is always on that path.
+ln -sf /usr/local/bin/anonx /usr/sbin/anonx
+ok "symlinked /usr/sbin/anonx (so 'sudo anonx' always resolves)"
+echo
+
+# ================= 5) smoke test: does Tor really come up here? =================
+if [ "$RUN_TEST" -eq 1 ]; then
+  echo "  ${W}smoke test${N} ${D}(proving Tor can start on this machine)${N}"
+  systemctl restart tor@default 2>/dev/null || systemctl restart tor 2>/dev/null
+  up=0
+  for i in $(seq 1 25); do
+    ss -tln 2>/dev/null | grep -q '127.0.0.1:9040' \
+      && ss -tln 2>/dev/null | grep -q '127.0.0.1:9050' && { up=1; break; }
+    sleep 1
+  done
+  if [ "$up" -eq 1 ]; then
+    ok "Tor bound its ports (9040 transparent · 9050 socks · 5353 dns)"
+    # bootstrap is best-effort: it needs working internet at install time
+    boot=0
+    for i in $(seq 1 20); do
+      pct=$(timeout 6 bash -c '
+        c=$(xxd -ps -c 32 /run/tor/control.authcookie 2>/dev/null | tr -d "\n"); [ -n "$c" ] || exit 0
+        exec 3<>/dev/tcp/127.0.0.1/9051 2>/dev/null || exit 0
+        printf "AUTHENTICATE %s\r\nGETINFO status/bootstrap-phase\r\nQUIT\r\n" "$c" >&3
+        timeout 5 cat <&3 2>/dev/null' | grep -o 'PROGRESS=[0-9]*' | head -1 | cut -d= -f2)
+      [ "$pct" = "100" ] && { boot=1; break; }
+      sleep 2
+    done
+    [ "$boot" -eq 1 ] \
+      && ok "Tor bootstrapped 100% — the full stack works here" \
+      || warn "Tor started but did not finish bootstrapping (check your internet; anonx will retry on start)"
+  else
+    systemctl stop tor@default 2>/dev/null
+    die "Tor could not open its ports here — anonx would not work. Config/kernel issue; nothing left running."
+  fi
+  systemctl stop tor@default 2>/dev/null
+  ok "smoke test done — Tor stopped again (anonx starts it when you go anonymous)"
+  echo
 fi
 
-# tor must not autostart on its own: anonx starts and stops it
-systemctl disable tor@default >/dev/null 2>&1
-systemctl disable tor        >/dev/null 2>&1
-
-# ---------------- the tool ----------------
-install -m 755 "$SRC/anonx" /usr/local/bin/anonx || { bad "could not install anonx"; exit 1; }
-ok "installed /usr/local/bin/anonx"
-
-# Many sudo configs (Kali among them) ship secure_path without /usr/local/bin,
-# so `sudo anonx` fails with "command not found" while plain `anonx` works.
-# /usr/sbin is always in that path and is the right place for a root-only tool.
-ln -sf /usr/local/bin/anonx /usr/sbin/anonx
-ok "symlinked /usr/sbin/anonx (so 'sudo anonx' resolves everywhere)"
-
-printf "${D}────────────────────────────────────────────────────────${N}\n"
-ok "done"
+line
+ok "anonx installed"
 echo
 echo "  ${G}sudo anonx start${N}       go anonymous"
 echo "  ${G}sudo anonx start 30s${N}   ...rotating the exit IP every 30 seconds"
