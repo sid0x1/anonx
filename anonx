@@ -865,14 +865,24 @@ update(){
   fi
 
   remote_ver=$(grep -m1 '^VERSION=' "$tmp" | cut -d'"' -f2)
-  if [ "$remote_ver" = "$VERSION" ] && [ "$1" != "--force" ]; then
-    rm -f "$tmp"; ok "already up to date (${W}v$VERSION${N})"; return 0
+
+  # Compare by CONTENT, not just the version string. Fixes and tweaks often
+  # ship without bumping VERSION, so a version-only check would wrongly report
+  # "up to date" and never pull them. If a single byte differs, we update.
+  if cmp -s "$tmp" "$self" && [ "$1" != "--force" ]; then
+    rm -f "$tmp"; ok "already the latest ${W}v$VERSION${N} ${D}(identical to $UPDATE_URL)${N}"; return 0
   fi
 
   mkdir -p "$STATE"
   cp -f "$self" "$STATE/anonx.prev" 2>/dev/null
   install -m 755 "$tmp" "$self" && rm -f "$tmp" || { bad "install failed"; return 1; }
-  ok "updated ${W}v$VERSION${N} → ${G}v$remote_ver${N}  ${D}(old copy kept at $STATE/anonx.prev)${N}"
+  # keep the /usr/sbin shim pointing at the updated file
+  [ -e /usr/sbin/anonx ] && [ ! -L /usr/sbin/anonx ] && install -m 755 "$self" /usr/sbin/anonx 2>/dev/null
+  if [ "$remote_ver" = "$VERSION" ]; then
+    ok "refreshed to the latest ${G}v$remote_ver${N} ${D}(newer build, same version — old copy at $STATE/anonx.prev)${N}"
+  else
+    ok "updated ${W}v$VERSION${N} → ${G}v$remote_ver${N}  ${D}(old copy kept at $STATE/anonx.prev)${N}"
+  fi
   if firewall_locked; then
     info "anonx is running — apply the new version with: ${G}sudo anonx restart${N}"
   fi
