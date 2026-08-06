@@ -63,6 +63,7 @@ ethtool:ethtool:reading the real (permanent) MAC
 curl:curl:verifying that traffic really goes through Tor
 xxd:xxd:reading Tor's control cookie
 chattr:e2fsprogs:locking resolv.conf against rewrites
+conntrack:conntrack:dropping pre-existing connections so none leak past Tor
 dig:dnsutils:testing Tor's DNS port in doctor
 ping:iputils-ping:checking the link is really up after a MAC change
 systemctl:systemd:starting and stopping the Tor service
@@ -196,8 +197,12 @@ ok "symlinked /usr/sbin/anonx (so 'sudo anonx' always resolves)"
 echo
 
 # ================= 5) smoke test: does Tor really come up here? =================
-# start tor and wait for the transparent ports; returns 0 if they come up
+# start tor and wait for the transparent ports; returns 0 if they come up.
+# Clears systemd's start-rate-limit first — repeated restarts (e.g. re-running
+# the installer) trip "Start request repeated too quickly / start-limit-hit",
+# after which systemd refuses to start tor until the counter is reset.
 tor_ports_up(){
+  systemctl reset-failed tor@default 2>/dev/null
   systemctl restart tor@default 2>/dev/null || systemctl restart tor 2>/dev/null
   local i
   for i in $(seq 1 25); do

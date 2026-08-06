@@ -153,10 +153,19 @@ tor_active(){ systemctl is-active --quiet tor@default || systemctl is-active --q
 tor_ports_up(){ ss -tln 2>/dev/null | grep -q '127.0.0.1:9040'; }
 
 # Restart Tor and wait for the transparent ports to come back.
+# reset-failed first: repeated restarts (rotation, retries, re-running start)
+# trip systemd's "start-limit-hit" and then Tor refuses to start until the
+# restart counter is cleared. Clearing it every time makes restarts reliable.
 tor_restart(){
+  systemctl reset-failed tor@default 2>/dev/null
+  systemctl reset-failed tor         2>/dev/null
   systemctl restart tor@default 2>/dev/null || systemctl restart tor 2>/dev/null
   local i
   for i in $(seq 1 30); do tor_ports_up && return 0; sleep 1; done
+  # last resort: kick the rate-limit again and try once more
+  systemctl reset-failed tor@default 2>/dev/null
+  systemctl restart tor@default 2>/dev/null || systemctl restart tor 2>/dev/null
+  for i in $(seq 1 15); do tor_ports_up && return 0; sleep 1; done
   return 1
 }
 
@@ -309,7 +318,12 @@ apply_firewall(){
   # ---- IPv4 filter: DROP anything that is not Tor ----
   iptables -F OUTPUT
   iptables -F INPUT
-  iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+  # NOTE: deliberately NO blanket "OUTPUT ESTABLISHED,RELATED ACCEPT" here.
+  # That rule would let connections opened *before* the lock keep sending
+  # traffic straight past Tor — a real de-anon leak. Everything legitimate is
+  # covered without it: Tor's own traffic by the owner match below, app traffic
+  # by the loopback redirect (-o lo), and LAN/DHCP by the explicit rules. The
+  # conntrack flush in start() already drops the old flows too.
   iptables -A OUTPUT -m owner --uid-owner "$TOR_UID" -j ACCEPT
   iptables -A OUTPUT -o lo -j ACCEPT
   # DHCP must stay alive, otherwise the lease expires under the lock and the
@@ -432,6 +446,27 @@ start(){
   net_settle || { bad "no usable link after MAC change — aborting (nothing locked)"; ANONX_ARMED=0; exit 1; }
   ok "link back up (gateway reachable)"
 
+  # 1b) remember the REAL public IP now, while we are still on the clear network.
+  #     After locking we compare against it — if the "anonymous" IP equals this,
+  #     traffic is NOT going through Tor and we must roll back.
+  REAL_IP=$(timeout 12 curl -s https://api.ipify.org 2>/dev/null)
+  [ -z "$REAL_IP" ] && REAL_IP=$(exit_ip | sed -n 's/.*"IP":"\([^"]*\)".*/\1/p')
+  [ -n "$REAL_IP" ] && info "real public IP right now: ${Y}$REAL_IP${N} ${D}(this is what must disappear)${N}"
+
+  # 1c) ANTI-LEAK: drop every connection that is open right now. Without this,
+  #     sockets established before the lock keep flowing outside Tor (the
+  #     firewall's ESTABLISHED rule lets them through) — a real de-anon leak.
+  if command -v conntrack >/dev/null 2>&1; then
+    local nconn
+    nconn=$(conntrack -C 2>/dev/null)
+    conntrack -F >/dev/null 2>&1
+    ok "cleared existing connections${nconn:+ (~$nconn)} — none can keep leaking outside Tor"
+  else
+    ip -s -j link >/dev/null 2>&1
+    warn "conntrack not installed — cannot force-drop pre-existing connections"
+    info "  install it for a tighter start:  ${G}sudo apt install conntrack${N}"
+  fi
+
   # 2) tor up with transparent-proxy config, on the settled link
   info "starting Tor..."
   tor_restart || { bad "Tor failed to start"; ANONX_ARMED=0; exit 1; }
@@ -481,6 +516,54 @@ start(){
     unlock_dns; restore_dns; restore_firewall
     ANONX_ARMED=0; exit 1
   fi
+
+  # 5b) ANONYMITY CHECK — prove every leak vector is actually sealed, and show
+  #     it. If anything fails we roll the whole thing back: a half-anonymous
+  #     state is worse than none, because you would trust it.
+  info "running anonymity checks..."
+  local leak=0 tor_json is_tor exit_now dns_line v6
+
+  tor_json=$(exit_ip)
+  is_tor=$(echo "$tor_json" | grep -o '"IsTor":[a-z]*' | cut -d: -f2)
+  exit_now=$(echo "$tor_json" | grep -o '"IP":"[^"]*"' | cut -d'"' -f4)
+
+  # (a) the exit IP must be Tor's, and must NOT equal your real IP
+  if [ "$is_tor" = "true" ] && [ -n "$exit_now" ] && [ "$exit_now" != "$REAL_IP" ]; then
+    ok "IP hidden:  ${Y}${REAL_IP:-real}${N} → ${G}$exit_now${N} ${D}(confirmed Tor exit)${N}"
+  else
+    bad "IP NOT hidden — public IP is still ${R}${exit_now:-unknown}${N}"; leak=1
+  fi
+
+  # (b) DNS must resolve through Tor's DNSPort, not your ISP
+  if timeout 15 dig +short +time=5 +tries=1 check.torproject.org @127.0.0.1 -p 5353 >/dev/null 2>&1; then
+    ok "DNS sealed:  queries resolve inside Tor (127.0.0.1 → DNSPort 5353)"
+  else
+    bad "DNS leak risk — Tor DNSPort did not answer"; leak=1
+  fi
+
+  # (c) IPv6 must be dead — it cannot ride Tor, so any v6 route is a leak
+  if timeout 8 curl -6 -s -o /dev/null https://ipv6.google.com 2>/dev/null; then
+    bad "IPv6 LEAK — a v6 request got out! (should be blocked)"; leak=1
+  else
+    ok "IPv6 sealed:  no v6 traffic escapes"
+  fi
+
+  # (d) resolv.conf must be pinned AND frozen so nothing rewrites it back
+  if grep -q '^nameserver 127.0.0.1' /etc/resolv.conf 2>/dev/null \
+     && lsattr /etc/resolv.conf 2>/dev/null | grep -q 'i'; then
+    ok "resolv.conf pinned to Tor and locked (immutable)"
+  else
+    warn "resolv.conf not fully locked — re-pinning"
+    printf 'nameserver 127.0.0.1\noptions edns0\n' > /etc/resolv.conf 2>/dev/null; lock_dns
+  fi
+
+  if [ "$leak" -ne 0 ]; then
+    bad "a leak was detected — rolling back so you are NOT falsely 'anonymous'"
+    stop_rotator >/dev/null 2>&1
+    unlock_dns; restore_dns; restore_firewall
+    ANONX_ARMED=0; exit 1
+  fi
+  ok "all anonymity checks passed — no leaks"
 
   # 6) rotation daemon — fresh log, so `status` never shows a stale "last change"
   : > "$STATE/rotate.log" 2>/dev/null
