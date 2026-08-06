@@ -27,6 +27,7 @@ rm -f /etc/systemd/system/anonx.service
 systemctl daemon-reload 2>/dev/null
 ok "boot service removed"
 
+rm -rf /etc/systemd/system/tor@default.service.d/anonx.conf; systemctl daemon-reload 2>/dev/null
 rm -f /usr/local/bin/anonx /usr/sbin/anonx
 ok "binary removed"
 

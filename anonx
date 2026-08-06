@@ -6,7 +6,7 @@
 #   * forces ALL DNS through Tor  (no DNS leak)
 #   * blocks ALL IPv6            (kills the #1 leak vector)
 #   * randomizes MAC on start
-#   * rotates the Tor exit IP every 5 minutes
+#   * rotates the Tor exit IP every 3 minutes
 #   * hard firewall lock: anything that is NOT Tor is DROPPED
 #
 #  Usage:
@@ -25,7 +25,7 @@
 set -o pipefail
 
 # ---------------- config ----------------
-INTERVAL=300                       # default seconds between IP rotations (5 min)
+INTERVAL=180                       # default seconds between IP rotations (3 min)
 ROTATE_MAC_EACH_CYCLE=0            # 1 = also change MAC every cycle (disrupts wifi)
 TOR_USER="debian-tor"
 STATE=/var/lib/anonx
@@ -33,7 +33,7 @@ MIN_INTERVAL=10                    # Tor rate-limits NEWNYM; below this it is a 
 
 # a saved interval (anonx interval 45s) wins over the default above
 [ -r "$STATE/interval" ] && INTERVAL=$(cat "$STATE/interval" 2>/dev/null)
-case "$INTERVAL" in ''|*[!0-9]*) INTERVAL=300 ;; esac
+case "$INTERVAL" in ''|*[!0-9]*) INTERVAL=180 ;; esac
 NON_TOR="127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16"
 # ----------------------------------------
 
@@ -152,6 +152,18 @@ tor_active(){ systemctl is-active --quiet tor@default || systemctl is-active --q
 
 tor_ports_up(){ ss -tln 2>/dev/null | grep -q '127.0.0.1:9040'; }
 
+# make sure systemd will never rate-limit Tor restarts (installs a drop-in the
+# first time; harmless if it's already there). This is the permanent cure for
+# "start-limit-hit" that no amount of reset-failed can prevent on its own.
+ensure_no_startlimit(){
+  local d=/etc/systemd/system/tor@default.service.d
+  [ -f "$d/anonx.conf" ] && return 0
+  mkdir -p "$d" 2>/dev/null || return 1
+  printf '[Unit]\nStartLimitIntervalSec=0\n' > "$d/anonx.conf" 2>/dev/null
+  systemctl daemon-reload 2>/dev/null
+  systemctl reset-failed tor@default 2>/dev/null
+}
+
 # wait until Tor's ports are released (a just-stopped tor holds them a moment)
 tor_ports_free(){
   local i
@@ -169,6 +181,7 @@ tor_ports_free(){
 # reset-failed → start, and if the limit trips mid-wait, clear it and kick again.
 tor_restart(){
   local i
+  ensure_no_startlimit
   systemctl stop tor@default 2>/dev/null
   tor_ports_free
   systemctl reset-failed tor@default 2>/dev/null
@@ -922,6 +935,8 @@ mac_rotate(){
 # and show you exactly what changed. Add a line here whenever you change anonx.
 changelog_data(){
 cat <<'EOF'
+#CL# 1.0 2026-08-07 Permanently disable systemd's Tor start-limit via a drop-in, so 'start-limit-hit' can't happen for anyone
+#CL# 1.0 2026-08-07 Default IP-rotation interval is now 3 minutes
 #CL# 1.0 2026-08-07 Installer & tool auto-recover from systemd's Tor start-limit (no more 'start request repeated too quickly')
 #CL# 1.0 2026-08-07 Show what changed after 'anonx update' (this changelog)
 #CL# 1.0 2026-08-07 Closed a pre-lock de-anon leak; live anonymity checks on start; auto-fix Tor start-limit

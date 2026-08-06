@@ -176,6 +176,19 @@ fi
 systemctl disable tor@default >/dev/null 2>&1
 systemctl disable tor         >/dev/null 2>&1
 
+# Kill systemd's start-rate-limit for tor@default once and for all. By default
+# systemd allows 5 starts / 10s then refuses with "start-limit-hit" — the error
+# everyone hit after a couple of restarts. Interval 0 disables the limit.
+mkdir -p /etc/systemd/system/tor@default.service.d
+cat > /etc/systemd/system/tor@default.service.d/anonx.conf <<'EOF'
+# installed by anonx — never rate-limit Tor restarts
+[Unit]
+StartLimitIntervalSec=0
+EOF
+systemctl daemon-reload 2>/dev/null
+systemctl reset-failed tor@default 2>/dev/null
+ok "disabled systemd's Tor start-rate-limit (no more 'start-limit-hit')"
+
 # validate the tor config actually parses before we rely on it
 if tor --verify-config -f "$TORRC" >/dev/null 2>&1; then
   ok "tor configuration verified"
