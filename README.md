@@ -19,7 +19,7 @@
 
 <br><br>
 
-<img src="assets/terminal-status.svg" alt="anonx status — ANONYMOUS via Tor" width="86%">
+<img src="assets/demo.svg" alt="anonx start — going anonymous (animated)" width="86%">
 
 </div>
 
@@ -104,6 +104,18 @@ network first, so you can never uninstall yourself into a locked firewall.
 
 Time format: `30s` seconds · `5m` minutes · `1h` hours (minimum `10s`, because
 Tor rate-limits new circuits below that).
+
+<br>
+
+## 📸 Screenshots
+
+<div align="center">
+
+<img src="assets/terminal-status.svg" alt="anonx status — full ANONYMOUS view" width="86%">
+
+<sub>One glance tells you everything — the verdict up top, every layer explained below.</sub>
+
+</div>
 
 <br>
 

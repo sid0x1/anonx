@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 320" width="820" height="320" role="img" aria-label="anonx start — animated demo">
+  <defs>
+    <filter id="dropd" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="20" stdDeviation="26" flood-color="#000000" flood-opacity="0.55"/>
+    </filter>
+    <linearGradient id="tbard" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#21262d"/><stop offset="1" stop-color="#161b22"/>
+    </linearGradient>
+    <clipPath id="type" clipPathUnits="userSpaceOnUse">
+      <rect x="74" y="90" width="0" height="20">
+        <animate attributeName="width" values="0;0;214;214;214;0" keyTimes="0;0.04;0.34;0.94;0.97;1" dur="7s" repeatCount="indefinite"/>
+      </rect>
+    </clipPath>
+    <style>.md{font-family:'JetBrains Mono','Fira Code','SFMono-Regular',ui-monospace,Consolas,monospace;font-size:15.5px;}</style>
+  </defs>
+
+  <!-- 3D slab -->
+  <rect x="30" y="34" width="760" height="252" rx="16" fill="#04060a"/>
+  <g filter="url(#dropd)">
+    <rect x="30" y="24" width="760" height="252" rx="16" fill="#0b0e14" stroke="#30363d" stroke-width="1.2"/>
+  </g>
+  <path d="M46 24 H774 A16 16 0 0 1 790 40 V66 H30 V40 A16 16 0 0 1 46 24 Z" fill="url(#tbard)"/>
+  <line x1="30" y1="66" x2="790" y2="66" stroke="#30363d" stroke-width="1"/>
+  <circle cx="56" cy="45" r="7" fill="#ff5f56"/>
+  <circle cx="80" cy="45" r="7" fill="#ffbd2e"/>
+  <circle cx="104" cy="45" r="7" fill="#27c93f"/>
+  <text x="410" y="50" class="md" font-size="14" fill="#8b949e" text-anchor="middle">sid@kali: ~  —  going anonymous</text>
+
+  <g class="md" xml:space="preserve">
+    <!-- prompt + typed command (revealed by the clip) -->
+    <text x="52" y="106"><tspan fill="#56d364" font-weight="700">$ </tspan></text>
+    <g clip-path="url(#type)">
+      <text x="74" y="106" fill="#e6edf3">sudo anonx start 30s</text>
+    </g>
+    <!-- typing cursor: rides the end of the text, then blinks -->
+    <rect y="92" width="9" height="17" fill="#56d364">
+      <animate attributeName="x" values="74;74;288;288;288;74" keyTimes="0;0.04;0.34;0.94;0.97;1" dur="7s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="1;1;1;0;1;0;1;0;1;1" keyTimes="0;0.33;0.34;0.45;0.55;0.65;0.75;0.85;0.95;1" dur="7s" repeatCount="indefinite"/>
+    </rect>
+
+    <!-- output lines, revealed one by one -->
+    <g opacity="0">
+      <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.40;0.44;0.96;1" dur="7s" repeatCount="indefinite"/>
+      <text x="52" y="142"><tspan fill="#3fb950" font-weight="700">✔</tspan><tspan fill="#c9d1d9">  MAC randomized  </tspan><tspan fill="#bc8cff">de:3c:cf:ec:65:94</tspan></text>
+    </g>
+    <g opacity="0">
+      <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.52;0.56;0.96;1" dur="7s" repeatCount="indefinite"/>
+      <text x="52" y="170"><tspan fill="#3fb950" font-weight="700">✔</tspan><tspan fill="#c9d1d9">  Tor bootstrapped  </tspan><tspan fill="#56d364" font-weight="700">100%</tspan><tspan fill="#6e7681">  (circuits ready)</tspan></text>
+    </g>
+    <g opacity="0">
+      <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.64;0.68;0.96;1" dur="7s" repeatCount="indefinite"/>
+      <text x="52" y="198"><tspan fill="#3fb950" font-weight="700">✔</tspan><tspan fill="#c9d1d9">  firewall locked  </tspan><tspan fill="#6e7681">— non-Tor traffic is dropped</tspan></text>
+    </g>
+
+    <!-- verdict -->
+    <g opacity="0">
+      <animate attributeName="opacity" values="0;0;1;1;1;0" keyTimes="0;0.74;0.80;0.90;0.96;1" dur="7s" repeatCount="indefinite"/>
+      <rect x="52" y="222" width="122" height="26" rx="6" fill="#3fb950"/>
+      <text x="113" y="240" fill="#03130a" font-weight="800" text-anchor="middle">ANONYMOUS</text>
+      <text x="188" y="240"><tspan fill="#e3b341" font-weight="700">185.220.101.178</tspan><tspan fill="#6e7681">  ·  new exit IP every 30s</tspan></text>
+    </g>
+  </g>
+</svg>
