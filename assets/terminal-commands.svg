@@ -20,13 +20,13 @@
   <circle cx="104" cy="45" r="7" fill="#27c93f"/>
   <text x="410" y="50" class="m2" font-size="14" fill="#8b949e" text-anchor="middle">sid@kali: ~  —  anonx --help</text>
 
-  <g class="m2">
-    <text x="52" y="104"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#58a6ff" font-weight="700">start</tspan><tspan fill="#e3b341"> 30s</tspan><tspan fill="#484f58">       # go anonymous, new IP every 30s</tspan></text>
-    <text x="52" y="138"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#58a6ff" font-weight="700">status</tspan><tspan fill="#484f58">        # are you anonymous right now?</tspan></text>
-    <text x="52" y="172"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#58a6ff" font-weight="700">ip</tspan><tspan fill="#484f58">            # grab a fresh exit IP now</tspan></text>
-    <text x="52" y="206"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#58a6ff" font-weight="700">mac</tspan><tspan fill="#484f58">           # grab a fresh MAC now</tspan></text>
-    <text x="52" y="240"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#58a6ff" font-weight="700">interval</tspan><tspan fill="#e3b341"> 2m</tspan><tspan fill="#484f58">  # change the rotation timer</tspan></text>
-    <text x="52" y="274"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#bc8cff" font-weight="700">doctor</tspan><tspan fill="#484f58">        # diagnose where the network died</tspan></text>
-    <text x="52" y="308"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#f85149" font-weight="700">stop</tspan><tspan fill="#484f58">          # back to your real identity</tspan></text>
+  <g class="m2" xml:space="preserve">
+    <text x="52" y="104"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#58a6ff" font-weight="700">start</tspan><tspan fill="#e3b341"> 30s</tspan><tspan x="336" fill="#484f58"># go anonymous, new IP every 30s</tspan></text>
+    <text x="52" y="138"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#58a6ff" font-weight="700">status</tspan><tspan x="336" fill="#484f58"># are you anonymous right now?</tspan></text>
+    <text x="52" y="172"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#58a6ff" font-weight="700">ip</tspan><tspan x="336" fill="#484f58"># grab a fresh exit IP now</tspan></text>
+    <text x="52" y="206"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#58a6ff" font-weight="700">mac</tspan><tspan x="336" fill="#484f58"># grab a fresh MAC now</tspan></text>
+    <text x="52" y="240"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#58a6ff" font-weight="700">interval</tspan><tspan fill="#e3b341"> 2m</tspan><tspan x="336" fill="#484f58"># change the rotation timer</tspan></text>
+    <text x="52" y="274"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#bc8cff" font-weight="700">doctor</tspan><tspan x="336" fill="#484f58"># diagnose where the network died</tspan></text>
+    <text x="52" y="308"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#f85149" font-weight="700">stop</tspan><tspan x="336" fill="#484f58"># back to your real identity</tspan></text>
   </g>
 </svg>
