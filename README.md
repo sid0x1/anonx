@@ -35,35 +35,19 @@ Python script, all of it goes through Tor because the kernel puts it there.
 
 ## Install
 
-**From the apt repository** (once it is published):
-
 ```bash
-echo "deb [trusted=yes] https://<user>.github.io/anonx ./" | sudo tee /etc/apt/sources.list.d/anonx.list
-sudo apt update && sudo apt install anonx
-```
-
-**From a downloaded package:**
-
-```bash
-sudo apt install ./anonx_1.0_all.deb
-```
-
-**From source:**
-
-```bash
-git clone https://github.com/<user>/anonx.git
+git clone https://github.com/sid-hack3r/anonx.git
 cd anonx
 sudo ./install.sh
 ```
 
-All three do the same work: pull the dependencies (`tor`, `macchanger`,
-`ethtool`, `iptables`, `curl`, `xxd`, `iproute2`), append the transparent-proxy
-block to `/etc/tor/torrc` (keeping a `.pre-anonx` backup), stop Tor from starting
-on its own — anonx owns its lifecycle.
+The installer pulls the dependencies (`tor`, `macchanger`, `ethtool`,
+`iptables`, `curl`, `xxd`, `iproute2`), appends the transparent-proxy block to
+`/etc/tor/torrc` (keeping a `.pre-anonx` backup) and stops Tor from starting on
+its own — anonx owns its lifecycle.
 
-Remove it with `sudo apt purge anonx` or `sudo ./uninstall.sh --purge`. Both
-restore your network first, so you can never uninstall yourself into a locked
-firewall.
+Remove it with `sudo ./uninstall.sh --purge`, which restores your network first,
+so you can never uninstall yourself into a locked firewall.
 
 ## Updating
 
@@ -71,17 +55,9 @@ firewall.
 sudo anonx update
 ```
 
-Package installs go through apt. Source installs download the latest script,
-verify it parses before replacing anything, and keep the previous copy in
-`/var/lib/anonx/anonx.prev`. Point it somewhere else with
-`echo 'UPDATE_URL=https://.../anonx' | sudo tee /etc/anonx.conf`.
-
-## Building the package
-
-```bash
-./packaging/build-deb.sh        # -> packaging/dist/anonx_1.0_all.deb
-./packaging/build-apt-repo.sh   # -> packaging/repo/  (publish with GitHub Pages)
-```
+It downloads the latest script, verifies it parses before replacing anything,
+and keeps the previous copy in `/var/lib/anonx/anonx.prev`. Point it somewhere
+else with `echo 'UPDATE_URL=https://.../anonx' | sudo tee /etc/anonx.conf`.
 
 ## Usage
 
