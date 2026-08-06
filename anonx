@@ -1148,6 +1148,7 @@ mac_rotate(){
 # and show you exactly what changed. Add a line here whenever you change anonx.
 changelog_data(){
 cat <<'EOF'
+#CL# 1.1 2026-08-07 uninstall.sh now removes everything by default (binary, state, config, drop-ins, torrc block incl. legacy) with a final clean-check
 #CL# 1.1 2026-08-07 New: exit-country (anonx exit de), leaktest, bridges (Snowflake), panic, stream isolation, UTC timezone, vendor-preserving MAC option
 #CL# 1.0 2026-08-07 Never spoof virtual interfaces (docker0, br-*, veth, VPNs) — only real physical NICs
 #CL# 1.0 2026-08-07 Permanently disable systemd's Tor start-limit via a drop-in, so 'start-limit-hit' can't happen for anyone
