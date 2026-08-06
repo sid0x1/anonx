@@ -162,9 +162,13 @@ else
 # --- anonx transparent proxy (added by install.sh) ---
 VirtualAddrNetwork 10.192.0.0/10
 AutomapHostsOnResolve 1
+# Stream isolation on the SOCKS port: a separate Tor circuit per destination
+# for apps that use SOCKS (so two sites can't be correlated). Kept OFF the
+# transparent TransPort on purpose — per-destination circuits there would build
+# a fresh circuit for every connection and make normal browsing crawl.
 TransPort 9040
 DNSPort 5353
-SocksPort 9050
+SocksPort 9050 IsolateDestAddr
 ControlPort 9051
 CookieAuthentication 1
 CookieAuthFileGroupReadable 1

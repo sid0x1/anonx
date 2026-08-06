@@ -125,6 +125,10 @@ changed on this system"*.
 | `sudo anonx ip` | New exit IP immediately |
 | `sudo anonx mac` | New MAC immediately (rebuilds Tor circuits after) |
 | `sudo anonx interval` `<time>` | Set how often the IP changes (`10s` … `1h`) |
+| `sudo anonx exit` `<cc>` | Leave through a country, e.g. `exit de` (`exit off` = any) |
+| `sudo anonx leaktest` | Score your setup for DNS / IPv6 / kill-switch leaks |
+| `sudo anonx bridges` `on\|off` | Reach Tor where it's blocked (Snowflake) |
+| `sudo anonx panic` | Cut all traffic and drop to your real identity **now** |
 | `sudo anonx doctor` | Layer-by-layer diagnosis of what broke |
 | `sudo anonx repair` | Force everything back to a working network |
 | `sudo anonx update` | Fetch the latest version |
@@ -191,28 +195,25 @@ you with a working network.
 
 <br>
 
-## 🛣️ Roadmap — coming in `v1.2`
+## 🛣️ Roadmap
 
-<sub>anonx today is a solid transparent-Tor gateway. Next it grows into a full anonymity cockpit.</sub>
-
-**🥇 Tier 1 — bigger shields**
-- `anonx leaktest` — one command that hammers DNS / IPv6 / WebRTC / transparent-proxy leaks and scores you
-- **Bridges & pluggable transports** (`obfs4`, `snowflake`) — reach Tor even where it's censored, with auto-fallback
+**✅ Shipped in `v1` — bigger shields**
+- `anonx leaktest` — hammers DNS / IPv6 / kill-switch / transparent-proxy leaks and scores you
 - **Choose your exit country** — `anonx exit de`, `anonx exit us` (`ExitNodes` + `StrictNodes`)
-- **Fail-closed at boot** — lock the firewall *before* the network is up, so even the startup window can't leak
-- `anonx panic` — instantly drop connections, restore identity and flush caches
+- **Bridges** (`snowflake`) — reach Tor even where it's censored, with auto-fallback if it can't bootstrap
+- `anonx panic` — instantly drop every connection, restore your identity and flush DNS caches
 
-**🥈 Tier 2 — smaller fingerprint**
-- Randomized hostname + forced UTC timezone (two of the biggest fingerprint vectors)
-- **Stream isolation** — a separate Tor circuit per destination, so sites can't be correlated
-- Log & trace scrubbing — volatile journald, shell history off, swap off/encrypted
-- Vendor-preserving MAC option (some routers block unknown OUIs)
+**✅ Shipped in `v1` — smaller fingerprint**
+- **Forced UTC timezone** while anonymous (a big region fingerprint), restored on stop
+- **Stream isolation** — a separate Tor circuit per destination on the SOCKS port, so sites can't be correlated
+- **Vendor-preserving MAC** option (`KEEP_MAC_VENDOR=1` in `/etc/anonx.conf`) for routers that block unknown OUIs
 
-**🥉 Tier 3 — polish & power**
+**🔜 Coming in `v2` — polish & power**
 - `anonx watch` — a live TUI dashboard (IP · circuit · bandwidth · countdown)
 - **Whitelist mode** — keep the LAN printer / SSH reachable while everything else rides Tor
 - Desktop notification on every exit-IP change
 - Shell completion, a man page, and one-command `.onion` hosting
+- Randomized hostname · log & trace scrubbing · `obfs4` bridges
 
 <sub>Ideas or requests? Open an issue — the list is driven by what people actually need.</sub>
 

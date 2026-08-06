@@ -30,6 +30,10 @@ ROTATE_MAC_EACH_CYCLE=0            # 1 = also change MAC every cycle (disrupts w
 TOR_USER="debian-tor"
 STATE=/var/lib/anonx
 MIN_INTERVAL=10                    # Tor rate-limits NEWNYM; below this it is a no-op
+FORCE_UTC=1                        # 1 = set the timezone to UTC while anonymous (a big fingerprint vector), restore on stop
+KEEP_MAC_VENDOR=0                  # 1 = keep the real vendor prefix (OUI) when randomizing the MAC
+# override any of these in /etc/anonx.conf
+[ -r /etc/anonx.conf ] && . /etc/anonx.conf 2>/dev/null
 
 # a saved interval (anonx interval 45s) wins over the default above
 [ -r "$STATE/interval" ] && INTERVAL=$(cat "$STATE/interval" 2>/dev/null)
@@ -179,6 +183,36 @@ ensure_no_startlimit(){
   systemctl reset-failed tor@default 2>/dev/null
 }
 
+# ---- timezone: UTC while anonymous (the local timezone is a fingerprint) ----
+tz_to_utc(){
+  [ "$FORCE_UTC" = 1 ] || return 0
+  command -v timedatectl >/dev/null 2>&1 || return 0
+  local cur; cur=$(timedatectl show -p Timezone --value 2>/dev/null)
+  [ -z "$cur" ] || [ "$cur" = "UTC" ] && return 0
+  echo "$cur" > "$STATE/timezone.bak" 2>/dev/null
+  timedatectl set-timezone UTC 2>/dev/null && return 0 || return 1
+}
+tz_restore(){
+  [ -s "$STATE/timezone.bak" ] || return 0
+  command -v timedatectl >/dev/null 2>&1 && \
+    timedatectl set-timezone "$(cat "$STATE/timezone.bak")" 2>/dev/null
+  rm -f "$STATE/timezone.bak"
+}
+
+# ---- stream isolation on the SOCKS port only ----
+# Per-destination circuits on the transparent TransPort would rebuild a circuit
+# for every single connection and make browsing crawl, so isolation is applied
+# only to SocksPort. Also undo any over-eager isolation an earlier build put on
+# TransPort/DNSPort.
+ensure_isolation(){
+  local T=/etc/tor/torrc
+  sed -i 's/^TransPort 9040 IsolateDestAddr.*/TransPort 9040/;
+          s/^DNSPort 5353 IsolateDestAddr.*/DNSPort 5353/' "$T" 2>/dev/null
+  grep -q '^SocksPort 9050 IsolateDestAddr' "$T" 2>/dev/null && return 0
+  grep -q '^SocksPort 9050' "$T" 2>/dev/null || return 0
+  sed -i 's/^SocksPort 9050$/SocksPort 9050 IsolateDestAddr/' "$T"
+}
+
 # wait until Tor's ports are released (a just-stopped tor holds them a moment)
 tor_ports_free(){
   local i
@@ -268,7 +302,14 @@ nm_managed(){
     | awk -F: -v d="$1" '$1==d && $2!="unmanaged"{f=1} END{exit !f}'
 }
 
-# set cloned MAC on a *profile* (works even if the profile is not active)
+# a random MAC that keeps a device's real vendor prefix (first 3 octets/OUI)
+vendor_mac(){
+  local perm; perm=$(mac_perm "$1"); is_mac "$perm" || return 1
+  printf '%s:%02x:%02x:%02x' "${perm%??:??:??}" $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256))
+}
+
+# set cloned MAC on a *profile* (works even if the profile is not active).
+# mode: random | permanent | an explicit aa:bb:.. value
 nm_setmac_conn(){
   local mode="$1" conn="$2" key
   [ -z "$conn" ] && return 1
@@ -281,9 +322,13 @@ nm_setmac_conn(){
 
 # set NM cloned MAC to "random" (spoof) or "permanent" (restore) on device $2
 nm_setmac(){
-  local mode="$1" dev="$2" conn
+  local mode="$1" dev="$2" conn nm="$1"
   conn=$(nm_conn "$dev"); [ -z "$conn" ] && return 1
-  nm_setmac_conn "$mode" "$conn" || return 1
+  # keep the real vendor prefix if asked (NM needs an explicit MAC for that)
+  if [ "$mode" = random ] && [ "$KEEP_MAC_VENDOR" = 1 ]; then
+    nm=$(vendor_mac "$dev") || nm=random
+  fi
+  nm_setmac_conn "$nm" "$conn" || return 1
   mkdir -p "$STATE" 2>/dev/null
   grep -qxF "$conn" "$STATE/nm_conns" 2>/dev/null || echo "$conn" >> "$STATE/nm_conns" 2>/dev/null
   nmcli connection up "$conn" >/dev/null 2>&1
@@ -299,8 +344,12 @@ setmac_all(){
       nm_setmac "$mode" "$dev"
     else
       ip link set "$dev" down 2>/dev/null
-      [ "$mode" = random ] && macchanger -r "$dev" >/dev/null 2>&1 \
-                           || macchanger -p "$dev" >/dev/null 2>&1
+      if [ "$mode" = random ]; then
+        [ "$KEEP_MAC_VENDOR" = 1 ] && macchanger -e "$dev" >/dev/null 2>&1 \
+                                   || macchanger -r "$dev" >/dev/null 2>&1
+      else
+        macchanger -p "$dev" >/dev/null 2>&1
+      fi
       ip link set "$dev" up 2>/dev/null
     fi
   done
@@ -519,6 +568,7 @@ start(){
   fi
 
   # 2) tor up with transparent-proxy config, on the settled link
+  ensure_isolation     # add stream-isolation flags to torrc if an old install lacks them
   info "starting Tor..."
   tor_restart || { bad "Tor failed to start"; ANONX_ARMED=0; exit 1; }
   ok "Tor transparent ports up (9040/5353/9051)"
@@ -616,6 +666,11 @@ start(){
   fi
   ok "all anonymity checks passed — no leaks"
 
+  # 5c) reduce fingerprint: neutralise the timezone (local TZ leaks your region)
+  if tz_to_utc; then
+    [ -s "$STATE/timezone.bak" ] && ok "timezone set to UTC (was $(cat "$STATE/timezone.bak")) — restored on stop"
+  fi
+
   # 6) rotation daemon — fresh log, so `status` never shows a stale "last change"
   : > "$STATE/rotate.log" 2>/dev/null
   start_rotator
@@ -701,6 +756,7 @@ stop(){
   stop_rotator; ok "rotation stopped"
   restore_firewall; ok "firewall restored (IPv4 + IPv6 open)"
   restore_dns; ok "DNS restored (resolv.conf unlocked)"
+  [ -s "$STATE/timezone.bak" ] && { tz_restore; ok "timezone restored"; }
   restore_mac
   ok "MAC restored → $(cur_mac)"
   # anonx started the service, so anonx shuts it down again — otherwise `status`
@@ -726,6 +782,7 @@ repair(){
   restore_firewall; ok "iptables + ip6tables flushed to ACCEPT"
   restore_dns; ok "DNS handed back to NetworkManager"
   restore_mac; ok "MAC set back to permanent on all profiles"
+  [ -s "$STATE/timezone.bak" ] && { tz_restore; ok "timezone restored"; }
   # same end state as `stop`: Tor off, so `status` doesn't say "running" while
   # anonx is clearly off
   if tor_active; then
@@ -914,6 +971,136 @@ doctor(){
   line
 }
 
+# ================= v1.x features (tier 1 + tier 2) =================
+
+# ---- exit country: route out through a chosen country ----
+exit_country(){
+  need_root exit
+  tor_active || { bad "Tor is not running — go anonymous first: ${G}sudo anonx start${N}"; return 1; }
+  local cc="$1"
+  if [ -z "$cc" ] || [ "$cc" = "off" ] || [ "$cc" = "any" ]; then
+    tor_ctl 'SETCONF ExitNodes= StrictNodes=0' >/dev/null
+    rm -f "$STATE/exit"
+    ok "exit country cleared — Tor picks any exit again"
+    newnym; local ip; ip=$(exit_ip_addr); [ -n "$ip" ] && info "new exit IP: ${Y}$ip${N}"
+    return 0
+  fi
+  cc=$(echo "$cc" | tr 'A-Z' 'a-z')
+  case "$cc" in [a-z][a-z]) ;; *) bad "use a 2-letter country code, e.g. ${G}anonx exit de${N} (or ${G}exit off${N})"; return 1 ;; esac
+  if tor_ctl "SETCONF ExitNodes={$cc} StrictNodes=1" | grep -q '250 OK'; then
+    echo "$cc" > "$STATE/exit"
+    ok "exit country set to ${W}${cc^^}${N} (strict)"
+    newnym; sleep 3
+    local ip; ip=$(exit_ip_addr)
+    if [ -n "$ip" ]; then info "exit IP now: ${Y}$ip${N}"
+    else warn "no exit found in ${cc^^} yet — Tor may have few/no exits there; try ${G}anonx exit off${N}"; fi
+  else
+    bad "Tor refused the exit setting (control port)"; return 1
+  fi
+}
+
+# ---- panic: instantly cut everything and return to your real identity ----
+panic(){
+  need_root panic
+  echo "${R}${BOLD}  PANIC — cutting all traffic and restoring your identity${N}"
+  stop_rotator >/dev/null 2>&1
+  command -v conntrack >/dev/null 2>&1 && conntrack -F >/dev/null 2>&1 && ok "dropped every open connection"
+  unlock_dns; restore_dns; restore_firewall
+  [ -s "$STATE/timezone.bak" ] && { tz_restore; ok "timezone restored"; }
+  command -v resolvectl >/dev/null 2>&1 && resolvectl flush-caches 2>/dev/null && ok "flushed DNS caches"
+  restore_mac
+  if tor_active; then systemctl stop tor@default 2>/dev/null || systemctl stop tor 2>/dev/null; fi
+  ok "Tor stopped, firewall open, MAC + DNS restored"
+  net_settle && ok "back on your real network" || warn "give NetworkManager a few seconds"
+  echo "  ${Y}You are on your REAL identity. Nothing is going through Tor.${N}"
+}
+
+# ---- bridges: reach Tor where it is blocked (Snowflake pluggable transport) ----
+bridges_cmd(){
+  need_root bridges
+  local TORRC=/etc/tor/torrc mode="$1"
+  if [ "$mode" = "off" ]; then
+    sed -i '/# --- anonx bridges/,/# --- end anonx bridges ---/d' "$TORRC"
+    ok "bridges disabled — using the normal Tor network"
+    tor_active && { info "restarting Tor..."; tor_restart && wait_tor_bootstrap && ok "Tor back on the normal network"; }
+    return 0
+  fi
+  # need the snowflake client
+  local snow
+  snow=$(command -v snowflake-client || command -v snowflake || echo /usr/bin/snowflake-client)
+  if [ ! -x "$snow" ]; then
+    bad "snowflake client not installed"
+    info "install it, then run this again:  ${G}sudo apt install snowflake-client${N}"
+    return 1
+  fi
+  if grep -q "anonx bridges" "$TORRC"; then
+    ok "bridges already enabled"
+  else
+    cat >> "$TORRC" <<EOF
+
+# --- anonx bridges (Snowflake) ---
+UseBridges 1
+ClientTransportPlugin snowflake exec $snow
+Bridge snowflake 192.0.2.3:80 2B280B23E1107BB62ABFC40DDCC8824814F80A72 fingerprint=2B280B23E1107BB62ABFC40DDCC8824814F80A72 url=https://1098762253.rsc.cdn77.org/ fronts=www.cdn77.com,www.phpmyadmin.net ice=stun:stun.l.google.com:19302,stun:stun.antisip.com:3478 utls-imitate=hellorandomizedalpn
+# --- end anonx bridges ---
+EOF
+    ok "Snowflake bridge configured"
+  fi
+  info "restarting Tor over bridges (can take up to a minute)..."
+  if tor_restart && wait_tor_bootstrap && tor_works; then
+    ok "connected to Tor through Snowflake bridges"
+  else
+    bad "could not bootstrap over bridges — reverting to the normal network"
+    sed -i '/# --- anonx bridges/,/# --- end anonx bridges ---/d' "$TORRC"
+    tor_restart && wait_tor_bootstrap
+    return 1
+  fi
+}
+
+# ---- leaktest: prove there is no leak, with a score ----
+leaktest(){
+  need_root leaktest
+  echo "${W}${BOLD}  anonx leaktest${N}"; line
+  local pass=0 total=0 json is_tor ip
+  step(){ total=$((total+1)); }
+
+  json=$(exit_ip); is_tor=$(echo "$json" | grep -o '"IsTor":[a-z]*' | cut -d: -f2)
+  ip=$(echo "$json" | grep -o '"IP":"[^"]*"' | cut -d'"' -f4)
+
+  step
+  if [ "$is_tor" = "true" ]; then ok "Tor routing:   traffic exits via Tor (${Y}$ip${N})"; pass=$((pass+1))
+  else bad "Tor routing:   ${R}NOT through Tor${N} — you are exposed"; fi
+
+  step
+  if firewall_locked && iptables -C OUTPUT -j REJECT 2>/dev/null; then ok "Kill switch:   active (non-Tor traffic is dropped)"; pass=$((pass+1))
+  else bad "Kill switch:   ${R}off${N} — a Tor failure would leak"; fi
+
+  step
+  if timeout 8 curl -6 -s -o /dev/null https://ipv6.google.com 2>/dev/null; then bad "IPv6 leak:     ${R}a v6 request escaped${N}"
+  else ok "IPv6:          sealed (no v6 escapes)"; pass=$((pass+1)); fi
+
+  step
+  # DNS must go through Tor: a direct query to a public resolver must FAIL
+  if timeout 6 dig +short +time=3 +tries=1 example.com @8.8.8.8 >/dev/null 2>&1; then
+    bad "DNS leak:      ${R}a query reached 8.8.8.8 directly${N}"
+  else ok "DNS:           sealed (no query reaches outside resolvers)"; pass=$((pass+1)); fi
+
+  step
+  if timeout 15 dig +short +time=5 +tries=1 check.torproject.org @127.0.0.1 -p 5353 >/dev/null 2>&1; then
+    ok "DNS via Tor:   names resolve inside Tor"; pass=$((pass+1))
+  else bad "DNS via Tor:   ${R}Tor DNSPort not answering${N}"; fi
+
+  line
+  local pct=$((pass*100/total))
+  if [ "$pass" -eq "$total" ]; then
+    printf "  ${G}${BOLD}  SCORE: %d/%d — no leaks detected${N}\n" "$pass" "$total"
+  else
+    printf "  ${R}${BOLD}  SCORE: %d/%d (%d%%) — fix the red items above${N}\n" "$pass" "$total" "$pct"
+    info "not anonymous? ${G}sudo anonx start${N}   ·   half-broken? ${G}sudo anonx repair${N}"
+  fi
+  line
+}
+
 ip_rotate(){
   need_root ip
   local before after
@@ -961,6 +1148,7 @@ mac_rotate(){
 # and show you exactly what changed. Add a line here whenever you change anonx.
 changelog_data(){
 cat <<'EOF'
+#CL# 1.0 2026-08-07 New: exit-country (anonx exit de), leaktest, bridges (Snowflake), panic, stream isolation, UTC timezone, vendor-preserving MAC option
 #CL# 1.0 2026-08-07 Never spoof virtual interfaces (docker0, br-*, veth, VPNs) — only real physical NICs
 #CL# 1.0 2026-08-07 Permanently disable systemd's Tor start-limit via a drop-in, so 'start-limit-hit' can't happen for anyone
 #CL# 1.0 2026-08-07 Default IP-rotation interval is now 3 minutes
@@ -1132,7 +1320,13 @@ usage(){
   printf "  ${W}CHANGE IDENTITY${N}\n"
   printf "    ${G}sudo anonx ip${N}               get a new exit IP immediately\n"
   printf "    ${G}sudo anonx mac${N}              get a new MAC address immediately\n"
-  printf "    ${G}sudo anonx interval${N} ${D}<time>${N}  set how often the IP changes\n\n"
+  printf "    ${G}sudo anonx interval${N} ${D}<time>${N}  set how often the IP changes\n"
+  printf "    ${G}sudo anonx exit${N} ${D}<cc>${N}       leave through a country, e.g. ${D}exit de${N} (exit off = any)\n\n"
+
+  printf "  ${W}STAY SAFE${N}\n"
+  printf "    ${G}sudo anonx leaktest${N}         score your setup for DNS / IPv6 / kill-switch leaks\n"
+  printf "    ${G}sudo anonx bridges${N} ${D}on|off${N}   reach Tor where it's blocked (Snowflake)\n"
+  printf "    ${G}sudo anonx panic${N}            cut all traffic and drop back to your real identity NOW\n\n"
 
   printf "  ${W}WHEN SOMETHING FEELS WRONG${N}\n"
   printf "    ${G}sudo anonx doctor${N}           checks every layer and names what broke\n"
@@ -1196,6 +1390,10 @@ case "$1" in
   ip)       ip_rotate ;;
   mac)      mac_rotate ;;
   interval) interval_cmd "$2" ;;
+  exit)      exit_country "$2" ;;
+  bridges)   bridges_cmd "$2" ;;
+  leaktest)  leaktest ;;
+  panic)     panic ;;
   update)    update "$2" ;;
   changelog) changelog ;;
   help|--help|-h) usage ;;
