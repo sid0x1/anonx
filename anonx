@@ -68,7 +68,7 @@ sig(){ printf "  ${D}anonx v%s${N} ${D}·${N} ${A}%s${N}\n" "$VERSION" "$AUTHOR"
 # lock: off", "MAC NOT spoofed" — while anonx is in fact running fine. So never
 # run unprivileged: re-exec through sudo instead.
 # help and version read nothing, so they never need to ask for a password
-case "${1:-}" in ''|help|--help|-h|version|--version|-v) ANONX_NOSUDO=1 ;; esac
+case "${1:-}" in ''|help|--help|-h|version|--version|-v|changelog) ANONX_NOSUDO=1 ;; esac
 
 if [ "$(id -u)" -ne 0 ] && [ -z "$ANONX_NOSUDO" ]; then
   if command -v sudo >/dev/null 2>&1; then
@@ -900,6 +900,43 @@ mac_rotate(){
   fi
 }
 
+# ---------------- changelog ----------------
+# Newest first. Each entry is one "#CL# <ver> <date> <summary>" line — the
+# distinctive prefix lets `update` diff this list between the old and new script
+# and show you exactly what changed. Add a line here whenever you change anonx.
+changelog_data(){
+cat <<'EOF'
+#CL# 1.0 2026-08-07 Show what changed after 'anonx update' (this changelog)
+#CL# 1.0 2026-08-07 Closed a pre-lock de-anon leak; live anonymity checks on start; auto-fix Tor start-limit
+#CL# 1.0 2026-08-07 'update' pulls fixes even when the version number is unchanged (compares content)
+#CL# 1.0 2026-08-07 Installer self-heals nat/ports issues, runs a smoke test, refuses on unsupported systems
+#CL# 1.0 2026-08-07 Manual rotation interval (start 30s / interval 2m); clearer status; 'stop' also stops Tor
+#CL# 1.0 2026-08-06 Initial release: transparent Tor gateway — MAC spoof, DNS+IPv6 sealed, exit-IP rotation
+EOF
+}
+
+changelog(){
+  echo "${W}${BOLD}  anonx changelog${N}"; line
+  changelog_data | sed 's/^#CL# //' | while read -r ver date rest; do
+    printf "  ${C}•${N} ${D}%s${N}  ${W}v%s${N}  %s\n" "$date" "$ver" "$rest"
+  done
+  line
+}
+
+# print the entries present in $1 (new) but not in $2 (old) — i.e. what changed
+whats_new(){
+  local nw
+  nw=$(comm -23 \
+        <(grep '^#CL# ' "$1" 2>/dev/null | sort) \
+        <(grep '^#CL# ' "$2" 2>/dev/null | sort))
+  [ -z "$nw" ] && return 1
+  # keep newest-first order as written in the new file
+  grep '^#CL# ' "$1" | while IFS= read -r ln; do
+    echo "$nw" | grep -qxF "$ln" && \
+      echo "$ln" | sed 's/^#CL# //' | { read -r ver date rest; printf "    ${G}✦${N} %s ${D}(%s)${N}\n" "$rest" "$date"; }
+  done
+}
+
 # ---------------- self update ----------------
 # Where a manual install pulls new versions from. Override in /etc/anonx.conf
 # (UPDATE_URL=...) or with ANONX_UPDATE_URL= in the environment.
@@ -956,6 +993,10 @@ update(){
     rm -f "$tmp"; ok "already the latest ${W}v$VERSION${N} ${D}(identical to $UPDATE_URL)${N}"; return 0
   fi
 
+  # work out what changed BEFORE we overwrite the current copy
+  local changes
+  changes=$(whats_new "$tmp" "$self")
+
   mkdir -p "$STATE"
   cp -f "$self" "$STATE/anonx.prev" 2>/dev/null
   install -m 755 "$tmp" "$self" && rm -f "$tmp" || { bad "install failed"; return 1; }
@@ -966,6 +1007,16 @@ update(){
   else
     ok "updated ${W}v$VERSION${N} → ${G}v$remote_ver${N}  ${D}(old copy kept at $STATE/anonx.prev)${N}"
   fi
+
+  # show exactly what this update brought in
+  if [ -n "$changes" ]; then
+    echo "  ${W}what's new${N}"
+    printf '%s\n' "$changes"
+  else
+    info "see the full history:  ${G}anonx changelog${N}"
+  fi
+  info "roll back if needed:  ${G}sudo cp $STATE/anonx.prev $self${N}"
+
   if firewall_locked; then
     info "anonx is running — apply the new version with: ${G}sudo anonx restart${N}"
   fi
@@ -1034,7 +1085,8 @@ usage(){
   printf "    ${G}sudo anonx disable${N}          turn that off again\n\n"
 
   printf "  ${W}KEEPING IT CURRENT${N}\n"
-  printf "    ${G}sudo anonx update${N}           fetch and install the latest version\n"
+  printf "    ${G}sudo anonx update${N}           fetch the latest version — shows what changed\n"
+  printf "    ${G}anonx changelog${N}             what changed in each version\n"
   printf "    ${G}anonx version${N}               show which version this is\n\n"
 
   printf "  ${W}TIME FORMAT${N}   ${D}(for start and interval)${N}\n"
@@ -1085,7 +1137,8 @@ case "$1" in
   ip)       ip_rotate ;;
   mac)      mac_rotate ;;
   interval) interval_cmd "$2" ;;
-  update)   update "$2" ;;
+  update)    update "$2" ;;
+  changelog) changelog ;;
   help|--help|-h) usage ;;
   restart)  stop; sleep 2; start ;;
   enable)   enable_boot ;;
