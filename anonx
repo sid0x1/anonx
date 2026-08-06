@@ -92,10 +92,25 @@ detect_iface(){
 IFACE=$(detect_iface)
 [ -z "$IFACE" ] && IFACE=$(ip -o link show up 2>/dev/null | awk -F': ' '$2!="lo"{print $2; exit}')
 
-# every NM connection that is currently active on a real device
+# A virtual/software interface we must NEVER spoof or lock onto: docker & LXC
+# bridges, veth pairs, VPN tunnels, libvirt, bonds, etc. Touching docker0 or a
+# br-* bridge breaks container networking and shows nonsense in status.
+is_virtual(){
+  case "$1" in
+    lo|docker*|br-*|veth*|virbr*|vnet*|tun*|tap*|wg*|tailscale*|zt*|bond*|dummy*|vmnet*|lxc*|lxdbr*|ifb*)
+      return 0 ;;
+  esac
+  [ -d "/sys/class/net/$1/bridge" ] && return 0   # any bridge
+  [ -e "/sys/class/net/$1/device" ] || return 0   # no backing hardware = virtual
+  return 1
+}
+
+# every NM connection active on a REAL physical device (virtual ones filtered)
 active_ifaces(){
+  local dev
   nmcli -t -f DEVICE,TYPE connection show --active 2>/dev/null \
-    | awk -F: '$1!="" && $1!="lo" && $2!="loopback"{print $1}'
+    | awk -F: '$1!="" && $1!="lo" && $2!="loopback"{print $1}' \
+  | while IFS= read -r dev; do is_virtual "$dev" || echo "$dev"; done
 }
 TOR_UID=$(id -u "$TOR_USER" 2>/dev/null)
 
@@ -397,10 +412,17 @@ restore_firewall(){
 # MAC readers. ip/ethtool are the reliable source (macchanger's permanent-MAC
 # read is the one that quietly returns garbage when it can't do the ioctl).
 mac_cur(){  ip -br link show "$1" 2>/dev/null | awk '{print $3}'; }
+is_mac(){ printf '%s' "$1" | grep -qiE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$'; }
 mac_perm(){
   local p
   p=$(ethtool -P "$1" 2>/dev/null | awk '{print $NF}')
-  case "$p" in ""|"00:00:00:00:00:00") p=$(macchanger -s "$1" 2>/dev/null | awk '/Permanent MAC/{print $3}') ;; esac
+  # ethtool prints "Permanent address: not set" on virtual NICs → awk grabs
+  # "set", which is not a MAC. Only accept a real xx:xx:.. value.
+  is_mac "$p" || p=""
+  case "$p" in ""|"00:00:00:00:00:00")
+    p=$(macchanger -s "$1" 2>/dev/null | awk '/Permanent MAC/{print $3}')
+    is_mac "$p" || p="" ;;
+  esac
   echo "$p"
 }
 cur_mac(){  mac_cur  "$IFACE"; }
@@ -746,8 +768,12 @@ status(){
     row "$YES" "Tor"      "${G}running${N} ${D}· fully connected to the Tor network${N}"
   elif tor_active && [ -n "$pct" ]; then
     row "$NO"  "Tor"      "${Y}starting — only ${pct}% ready${N} ${D}· no circuits yet, wait a moment${N}"
-  elif tor_active; then
+  elif tor_active && [ "$locked" -eq 1 ]; then
     row "$HM"  "Tor"      "${Y}running${N} ${D}· cannot read progress (control port silent)${N}"
+  elif tor_active; then
+    # anonx is OFF but Tor happens to be running (autostart / another app) —
+    # that's none of our business, so don't alarm the user
+    row "$DOT" "Tor"      "${D}running · not managed by anonx (start to go anonymous)${N}"
   elif [ "$locked" -eq 1 ]; then
     row "$NO"  "Tor"      "${R}stopped while the firewall is still locked${N} ${D}· sudo anonx repair${N}"
   else
@@ -935,6 +961,7 @@ mac_rotate(){
 # and show you exactly what changed. Add a line here whenever you change anonx.
 changelog_data(){
 cat <<'EOF'
+#CL# 1.0 2026-08-07 Never spoof virtual interfaces (docker0, br-*, veth, VPNs) — only real physical NICs
 #CL# 1.0 2026-08-07 Permanently disable systemd's Tor start-limit via a drop-in, so 'start-limit-hit' can't happen for anyone
 #CL# 1.0 2026-08-07 Default IP-rotation interval is now 3 minutes
 #CL# 1.0 2026-08-07 Installer & tool auto-recover from systemd's Tor start-limit (no more 'start request repeated too quickly')
