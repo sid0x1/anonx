@@ -84,6 +84,29 @@ leaving something broken.
 Remove it any time with `sudo ./uninstall.sh --purge` — it restores your network
 first, so you can never uninstall yourself into a locked firewall.
 
+<details>
+<summary><b>Install problems? (the installer fixes most of them itself)</b></summary>
+
+<br>
+
+The installer self-heals whatever it safely can and retries — it loads the
+`iptable_nat` module or switches to the nft backend if the nat table isn't ready,
+and stops a leftover Tor that's squatting on the ports. The only thing it won't
+touch is one of *your* apps. Remaining cases:
+
+| Message | What it means & how to fix |
+|---|---|
+| `held by <app> (a user app)` | Tor Browser / another program owns ports 9040/9050. Close it, then re-run — the installer won't kill your apps for you. |
+| `Tor could not open its ports` (with log) | Tor itself failed. Read the log lines it prints, or run `sudo -u debian-tor tor --verify-config` for the exact line. |
+| `apt could not install …` | A broken/again offline repo. Run `sudo apt update`, read the red lines, fix the source, re-run. |
+| `no usable nat table` | Kernel without nat support (rare, e.g. minimal container). `sudo modprobe iptable_nat` — if that fails, the kernel can't do it. |
+| `Unsupported here` | Not Debian/Kali/Ubuntu, or no systemd. anonx needs the `debian-tor` user and `tor@default` unit. |
+
+Nothing is left half-configured — a failed install always ends with *"nothing was
+changed on this system"*.
+
+</details>
+
 <br>
 
 ## ⚡ Commands

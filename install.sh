@@ -93,7 +93,11 @@ if [ -n "$missing" ]; then
   info "installing: ${Y}$missing${N}"
   apt-get update -qq 2>/dev/null || warn "apt-get update had warnings (continuing)"
   if ! apt-get install -y $missing >/dev/null 2>&1; then
-    die "apt could not install: $missing — install them by hand, then re-run"
+    bad "apt could not install: $missing"
+    info "fix: refresh apt and try the packages by hand:"
+    info "  ${G}sudo apt update${N} && ${G}sudo apt install $missing${N}"
+    info "if a repo is broken, check:  ${G}sudo apt update${N}  ${D}(read the red lines)${N}"
+    die "dependencies missing — install them, then re-run"
   fi
   # trust nothing: verify each command is actually callable now
   still=""
@@ -114,9 +118,28 @@ id debian-tor >/dev/null 2>&1 \
   && ok "tor user 'debian-tor' exists" \
   || die "user 'debian-tor' missing — the tor package did not set up correctly"
 
-iptables -t nat -L OUTPUT -n >/dev/null 2>&1 \
-  && ok "iptables nat table reachable" \
-  || die "iptables cannot use the nat table (kernel/nftables problem) — anonx can't redirect traffic here"
+nat_ok(){ iptables -t nat -L OUTPUT -n >/dev/null 2>&1; }
+if nat_ok; then
+  ok "iptables nat table reachable"
+else
+  # try to fix it ourselves before giving up
+  info "nat table not ready — loading the kernel module..."
+  modprobe iptable_nat 2>/dev/null; modprobe nf_nat 2>/dev/null
+  if nat_ok; then
+    ok "iptables nat table reachable ${D}(loaded iptable_nat)${N}"
+  elif command -v iptables-nft >/dev/null 2>&1; then
+    info "switching iptables to the nft backend..."
+    update-alternatives --set iptables  /usr/sbin/iptables-nft  >/dev/null 2>&1
+    update-alternatives --set ip6tables /usr/sbin/ip6tables-nft >/dev/null 2>&1
+    modprobe iptable_nat 2>/dev/null
+    nat_ok && ok "iptables nat table reachable ${D}(switched to nft backend)${N}"
+  fi
+  if ! nat_ok; then
+    bad "iptables still cannot use the nat table"
+    info "your kernel may lack nat support — check:  ${G}sudo modprobe iptable_nat${N}"
+    die "no usable nat table — anonx can't redirect traffic here"
+  fi
+fi
 
 ip6tables -L >/dev/null 2>&1 \
   && ok "ip6tables usable (IPv6 can be blocked)" \
@@ -156,7 +179,10 @@ systemctl disable tor         >/dev/null 2>&1
 if tor --verify-config -f "$TORRC" >/dev/null 2>&1; then
   ok "tor configuration verified"
 else
-  die "tor rejected the configuration — check $TORRC (restore $TORRC.pre-anonx)"
+  bad "tor rejected the configuration"
+  info "see the exact error:  ${G}sudo -u debian-tor tor --verify-config${N}"
+  info "restore the original:  ${G}sudo cp $TORRC.pre-anonx $TORRC${N}  ${D}(if a backup exists)${N}"
+  die "bad tor config — fix the line it names, then re-run"
 fi
 echo
 
@@ -170,15 +196,43 @@ ok "symlinked /usr/sbin/anonx (so 'sudo anonx' always resolves)"
 echo
 
 # ================= 5) smoke test: does Tor really come up here? =================
-if [ "$RUN_TEST" -eq 1 ]; then
-  echo "  ${W}smoke test${N} ${D}(proving Tor can start on this machine)${N}"
+# start tor and wait for the transparent ports; returns 0 if they come up
+tor_ports_up(){
   systemctl restart tor@default 2>/dev/null || systemctl restart tor 2>/dev/null
-  up=0
+  local i
   for i in $(seq 1 25); do
     ss -tln 2>/dev/null | grep -q '127.0.0.1:9040' \
-      && ss -tln 2>/dev/null | grep -q '127.0.0.1:9050' && { up=1; break; }
+      && ss -tln 2>/dev/null | grep -q '127.0.0.1:9050' && return 0
     sleep 1
   done
+  return 1
+}
+
+if [ "$RUN_TEST" -eq 1 ]; then
+  echo "  ${W}smoke test${N} ${D}(proving Tor can start on this machine)${N}"
+  up=0
+  tor_ports_up && up=1
+
+  # --- self-heal: if the ports are blocked, fix what we safely can and retry ---
+  if [ "$up" -eq 0 ]; then
+    holder=$(ss -tlnp 2>/dev/null | grep -E '127\.0\.0\.1:(9040|9050|9051)' | head -1)
+    hprog=$(echo "$holder" | grep -o 'users:(("[^"]*"' | grep -o '"[^"]*"' | tr -d '"' | head -1)
+    if [ -n "$hprog" ] && [ "$hprog" != "tor" ]; then
+      # a user app (Tor Browser / firefox) owns the ports — we must NOT kill it
+      warn "the ports are held by ${Y}$hprog${N} (a user app, e.g. Tor Browser)"
+      info "  → close it, then re-run:  ${G}sudo ./install.sh${N}"
+    else
+      # a stray/previous Tor is holding them — stop it ourselves and retry
+      info "a leftover Tor is holding the ports — stopping it and retrying..."
+      systemctl stop tor tor@default 2>/dev/null
+      pkill -x tor 2>/dev/null
+      modprobe iptable_nat 2>/dev/null
+      systemctl reset-failed tor@default 2>/dev/null
+      sleep 2
+      tor_ports_up && { up=1; ok "recovered — ports came up on retry"; }
+    fi
+  fi
+
   if [ "$up" -eq 1 ]; then
     ok "Tor bound its ports (9040 transparent · 9050 socks · 5353 dns)"
     # bootstrap is best-effort: it needs working internet at install time
@@ -196,8 +250,25 @@ if [ "$RUN_TEST" -eq 1 ]; then
       && ok "Tor bootstrapped 100% — the full stack works here" \
       || warn "Tor started but did not finish bootstrapping (check your internet; anonx will retry on start)"
   else
+    # auto-heal did not fix it — explain what is left for the user to do
+    echo
+    bad "Tor could not open its transparent ports (9040/9050/5353)"
+    echo
+    printf "  ${W}what to do${N}\n"
+    if [ -n "$hprog" ] && [ "$hprog" != "tor" ]; then
+      info "  • ${Y}$hprog${N} is holding the ports (a user app we won't kill for you)"
+      info "    close it, then re-run:  ${G}sudo ./install.sh${N}"
+    else
+      info "Tor's own log says why it stopped:"
+      journalctl -u tor@default -n 6 --no-pager 2>/dev/null | sed 's/^/      /'
+      echo
+      info "  • config error → ${G}sudo -u debian-tor tor --verify-config${N}"
+      info "  • full log     → ${G}sudo journalctl -u tor@default -n 50${N}"
+      info "  • then re-run  → ${G}sudo ./install.sh${N}"
+    fi
+    echo
     systemctl stop tor@default 2>/dev/null
-    die "Tor could not open its ports here — anonx would not work. Config/kernel issue; nothing left running."
+    die "smoke test failed — anonx would not work until Tor can bind its ports (nothing left running)"
   fi
   systemctl stop tor@default 2>/dev/null
   ok "smoke test done — Tor stopped again (anonx starts it when you go anonymous)"
