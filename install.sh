@@ -198,16 +198,35 @@ echo
 
 # ================= 5) smoke test: does Tor really come up here? =================
 # start tor and wait for the transparent ports; returns 0 if they come up.
-# Clears systemd's start-rate-limit first — repeated restarts (e.g. re-running
-# the installer) trip "Start request repeated too quickly / start-limit-hit",
-# after which systemd refuses to start tor until the counter is reset.
-tor_ports_up(){
-  systemctl reset-failed tor@default 2>/dev/null
-  systemctl restart tor@default 2>/dev/null || systemctl restart tor 2>/dev/null
+# wait until Tor's ports are free (a just-stopped tor can hold them a moment)
+ports_free(){
   local i
-  for i in $(seq 1 25); do
+  for i in $(seq 1 10); do
+    ss -tln 2>/dev/null | grep -qE '127\.0\.0\.1:(9040|9050)' || return 0
+    sleep 1
+  done
+  return 1
+}
+
+# Bring Tor up robustly. The #1 install failure is systemd's start-rate-limit:
+# repeated restarts (re-running the installer, earlier tries) trip "Start
+# request repeated too quickly / start-limit-hit" and then systemd REFUSES to
+# start tor at all until the counter is cleared. So we always: stop cleanly →
+# wait for the ports to be released → reset-failed → start. If systemd still
+# reports the limit mid-wait, we clear it and kick again.
+tor_bring_up(){
+  systemctl stop tor@default 2>/dev/null
+  ports_free
+  systemctl reset-failed tor@default 2>/dev/null
+  systemctl start tor@default 2>/dev/null || systemctl start tor 2>/dev/null
+  local i
+  for i in $(seq 1 30); do
     ss -tln 2>/dev/null | grep -q '127.0.0.1:9040' \
       && ss -tln 2>/dev/null | grep -q '127.0.0.1:9050' && return 0
+    if systemctl show tor@default -p Result 2>/dev/null | grep -q 'start-limit'; then
+      systemctl reset-failed tor@default 2>/dev/null
+      systemctl start tor@default 2>/dev/null
+    fi
     sleep 1
   done
   return 1
@@ -216,7 +235,7 @@ tor_ports_up(){
 if [ "$RUN_TEST" -eq 1 ]; then
   echo "  ${W}smoke test${N} ${D}(proving Tor can start on this machine)${N}"
   up=0
-  tor_ports_up && up=1
+  tor_bring_up && up=1
 
   # --- self-heal: if the ports are blocked, fix what we safely can and retry ---
   if [ "$up" -eq 0 ]; then
@@ -227,14 +246,14 @@ if [ "$RUN_TEST" -eq 1 ]; then
       warn "the ports are held by ${Y}$hprog${N} (a user app, e.g. Tor Browser)"
       info "  → close it, then re-run:  ${G}sudo ./install.sh${N}"
     else
-      # a stray/previous Tor is holding them — stop it ourselves and retry
-      info "a leftover Tor is holding the ports — stopping it and retrying..."
+      # a stray Tor or a tripped start-limit — clear it ourselves and retry
+      info "clearing a leftover Tor / systemd start-limit and retrying..."
       systemctl stop tor tor@default 2>/dev/null
       pkill -x tor 2>/dev/null
       modprobe iptable_nat 2>/dev/null
       systemctl reset-failed tor@default 2>/dev/null
-      sleep 2
-      tor_ports_up && { up=1; ok "recovered — ports came up on retry"; }
+      ports_free
+      tor_bring_up && { up=1; ok "recovered — ports came up on retry"; }
     fi
   fi
 
@@ -263,13 +282,22 @@ if [ "$RUN_TEST" -eq 1 ]; then
     if [ -n "$hprog" ] && [ "$hprog" != "tor" ]; then
       info "  • ${Y}$hprog${N} is holding the ports (a user app we won't kill for you)"
       info "    close it, then re-run:  ${G}sudo ./install.sh${N}"
+    elif systemctl show tor@default -p Result 2>/dev/null | grep -q 'start-limit'; then
+      # this is the exact case the user hit — say the real one-line fix
+      warn "systemd hit its start-rate-limit (too many restarts). This is not a"
+      warn "real fault — just run these two lines, then install again:"
+      info "    ${G}sudo systemctl reset-failed tor@default${N}"
+      info "    ${G}sudo ./install.sh${N}"
     else
-      info "Tor's own log says why it stopped:"
-      journalctl -u tor@default -n 6 --no-pager 2>/dev/null | sed 's/^/      /'
+      # a genuine tor failure — show tor's OWN error, not systemd's wrapper noise
+      info "Tor's own error:"
+      journalctl -u tor@default --no-pager -n 40 2>/dev/null \
+        | grep -iE 'err\]|warn\]|could not bind|address already|permission denied|unable to' \
+        | tail -5 | sed 's/^/      /'
       echo
-      info "  • config error → ${G}sudo -u debian-tor tor --verify-config${N}"
-      info "  • full log     → ${G}sudo journalctl -u tor@default -n 50${N}"
-      info "  • then re-run  → ${G}sudo ./install.sh${N}"
+      info "  • check the config → ${G}sudo -u debian-tor tor --verify-config${N}"
+      info "  • full log         → ${G}sudo journalctl -u tor@default -n 50${N}"
+      info "  • then re-run      → ${G}sudo ./install.sh${N}"
     fi
     echo
     systemctl stop tor@default 2>/dev/null

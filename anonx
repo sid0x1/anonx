@@ -152,20 +152,36 @@ tor_active(){ systemctl is-active --quiet tor@default || systemctl is-active --q
 
 tor_ports_up(){ ss -tln 2>/dev/null | grep -q '127.0.0.1:9040'; }
 
+# wait until Tor's ports are released (a just-stopped tor holds them a moment)
+tor_ports_free(){
+  local i
+  for i in $(seq 1 10); do
+    ss -tln 2>/dev/null | grep -qE '127\.0\.0\.1:(9040|9050)' || return 0
+    sleep 1
+  done
+  return 1
+}
+
 # Restart Tor and wait for the transparent ports to come back.
-# reset-failed first: repeated restarts (rotation, retries, re-running start)
-# trip systemd's "start-limit-hit" and then Tor refuses to start until the
-# restart counter is cleared. Clearing it every time makes restarts reliable.
+# The #1 failure is systemd's start-rate-limit: repeated restarts (rotation,
+# retries, re-running start) trip "start-limit-hit" and then systemd REFUSES to
+# start Tor until the counter is cleared. So: stop → wait for ports free →
+# reset-failed → start, and if the limit trips mid-wait, clear it and kick again.
 tor_restart(){
+  local i
+  systemctl stop tor@default 2>/dev/null
+  tor_ports_free
   systemctl reset-failed tor@default 2>/dev/null
   systemctl reset-failed tor         2>/dev/null
-  systemctl restart tor@default 2>/dev/null || systemctl restart tor 2>/dev/null
-  local i
-  for i in $(seq 1 30); do tor_ports_up && return 0; sleep 1; done
-  # last resort: kick the rate-limit again and try once more
-  systemctl reset-failed tor@default 2>/dev/null
-  systemctl restart tor@default 2>/dev/null || systemctl restart tor 2>/dev/null
-  for i in $(seq 1 15); do tor_ports_up && return 0; sleep 1; done
+  systemctl start tor@default 2>/dev/null || systemctl start tor 2>/dev/null
+  for i in $(seq 1 30); do
+    tor_ports_up && return 0
+    if systemctl show tor@default -p Result 2>/dev/null | grep -q 'start-limit'; then
+      systemctl reset-failed tor@default 2>/dev/null
+      systemctl start tor@default 2>/dev/null
+    fi
+    sleep 1
+  done
   return 1
 }
 
@@ -906,6 +922,7 @@ mac_rotate(){
 # and show you exactly what changed. Add a line here whenever you change anonx.
 changelog_data(){
 cat <<'EOF'
+#CL# 1.0 2026-08-07 Installer & tool auto-recover from systemd's Tor start-limit (no more 'start request repeated too quickly')
 #CL# 1.0 2026-08-07 Show what changed after 'anonx update' (this changelog)
 #CL# 1.0 2026-08-07 Closed a pre-lock de-anon leak; live anonymity checks on start; auto-fix Tor start-limit
 #CL# 1.0 2026-08-07 'update' pulls fixes even when the version number is unchanged (compares content)
