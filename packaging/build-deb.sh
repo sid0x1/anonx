@@ -17,7 +17,6 @@ trap 'rm -rf "$BUILD"' EXIT
 echo "building anonx $VER"
 
 install -Dm755 "$SRC/anonx"        "$BUILD/usr/bin/anonx"
-install -Dm644 "$SRC/shell/tor.sh" "$BUILD/usr/share/anonx/tor-shell.sh"
 install -Dm644 "$SRC/README.md"    "$BUILD/usr/share/doc/anonx/README.md"
 install -Dm644 "$SRC/LICENSE"      "$BUILD/usr/share/doc/anonx/copyright"
 
@@ -70,13 +69,6 @@ TORCFG
   # anonx starts and stops Tor itself; it must not come up on its own
   systemctl disable tor@default >/dev/null 2>&1 || true
   systemctl disable tor         >/dev/null 2>&1 || true
-
-  # interactive `tor` helper
-  for rc in /root/.zshrc /root/.bashrc /home/*/.zshrc /home/*/.bashrc; do
-    [ -f "$rc" ] || continue
-    grep -q "anonx/tor-shell.sh" "$rc" 2>/dev/null && continue
-    printf '\n# anonx: keep a bare `tor` usable while the tor service holds the ports\n[ -f /usr/share/anonx/tor-shell.sh ] && . /usr/share/anonx/tor-shell.sh\n' >> "$rc"
-  done
 
   # a previous manual install would shadow the packaged binary
   # -L too: /usr/sbin/anonx is usually a symlink, and once its target is gone

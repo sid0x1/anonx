@@ -30,14 +30,13 @@ ok "boot service removed"
 rm -f /usr/local/bin/anonx /usr/sbin/anonx
 ok "binary removed"
 
-# shell helper + the lines that source it
+# clean up the `tor` shell helper if an older version left it behind
 rm -rf /usr/local/share/anonx
 for rc in /root/.zshrc /root/.bashrc /home/*/.zshrc /home/*/.bashrc; do
   [ -f "$rc" ] || continue
   grep -q "anonx/tor-shell.sh" "$rc" 2>/dev/null || continue
   sed -i '/# anonx: keep a bare/d;/anonx\/tor-shell.sh/d' "$rc"
 done
-ok "shell helper removed"
 
 if [ "$1" = "--purge" ]; then
   if [ -f /etc/tor/torrc.pre-anonx ]; then

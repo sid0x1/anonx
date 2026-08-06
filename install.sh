@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #
 #  anonx installer
-#     sudo ./install.sh              full install (tool + torrc + shell helper)
-#     sudo ./install.sh --no-shell   skip the interactive `tor` helper
+#     sudo ./install.sh
 #
 set -o pipefail
 
@@ -14,8 +13,6 @@ info(){ printf "  ${C}•${N} %s\n" "$1"; }
 [ "$(id -u)" -eq 0 ] || { echo "${R}run as root:  sudo ./install.sh${N}"; exit 1; }
 
 SRC=$(cd "$(dirname "$0")" && pwd)
-WITH_SHELL=1
-[ "$1" = "--no-shell" ] && WITH_SHELL=0
 
 echo "${W}  installing anonx${N}"
 printf "${D}────────────────────────────────────────────────────────${N}\n"
@@ -135,20 +132,6 @@ ok "installed /usr/local/bin/anonx"
 ln -sf /usr/local/bin/anonx /usr/sbin/anonx
 ok "symlinked /usr/sbin/anonx (so 'sudo anonx' resolves everywhere)"
 
-# ---------------- interactive `tor` helper ----------------
-if [ "$WITH_SHELL" -eq 1 ]; then
-  install -d /usr/local/share/anonx
-  install -m 644 "$SRC/shell/tor.sh" /usr/local/share/anonx/tor-shell.sh
-  wired=0
-  for rc in /root/.zshrc /root/.bashrc /home/*/.zshrc /home/*/.bashrc; do
-    [ -f "$rc" ] || continue
-    grep -q "anonx/tor-shell.sh" "$rc" 2>/dev/null && { wired=$((wired+1)); continue; }
-    printf '\n# anonx: keep a bare `tor` usable while the tor service holds the ports\n[ -f /usr/local/share/anonx/tor-shell.sh ] && . /usr/local/share/anonx/tor-shell.sh\n' >> "$rc"
-    wired=$((wired+1))
-  done
-  ok "shell helper installed ($wired rc files)"
-fi
-
 printf "${D}────────────────────────────────────────────────────────${N}\n"
 ok "done"
 echo
@@ -156,5 +139,3 @@ echo "  ${G}sudo anonx start${N}       go anonymous"
 echo "  ${G}sudo anonx start 30s${N}   ...rotating the exit IP every 30 seconds"
 echo "  ${G}sudo anonx status${N}      check state    ${D}(anonx doctor if anything looks wrong)${N}"
 echo "  ${G}sudo anonx stop${N}        back to normal"
-echo
-echo "  ${D}open a new terminal (or: source ~/.zshrc) for the shell helper${N}"

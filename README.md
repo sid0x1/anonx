@@ -59,7 +59,7 @@ sudo ./install.sh
 All three do the same work: pull the dependencies (`tor`, `macchanger`,
 `ethtool`, `iptables`, `curl`, `xxd`, `iproute2`), append the transparent-proxy
 block to `/etc/tor/torrc` (keeping a `.pre-anonx` backup), stop Tor from starting
-on its own — anonx owns its lifecycle — and install the `tor` shell helper.
+on its own — anonx owns its lifecycle.
 
 Remove it with `sudo apt purge anonx` or `sudo ./uninstall.sh --purge`. Both
 restore your network first, so you can never uninstall yourself into a locked
@@ -149,7 +149,7 @@ Tor rather than leaving you offline.
 | "connected" but nothing loads | `sudo anonx doctor` — it tells you which layer died |
 | status shows everything off/red but anonx is running | you ran it without `sudo` on an older build; re-install |
 | DNS dead after a crash or reboot | `sudo anonx repair` (an interrupted run can leave `resolv.conf` immutable at `127.0.0.1`) |
-| `tor` in the terminal prints "Address already in use" | that's the running service holding 9050/9040/9051; install the shell helper, or use `sudo anonx status` |
+| `tor` in the terminal prints "Address already in use" | that's the Tor service anonx started already holding 9050/9040/9051 — nothing is wrong; check it with `sudo anonx status` |
 | Wi-Fi won't reconnect after a MAC change | `sudo anonx repair` resets `cloned-mac-address` back to `permanent` on every profile |
 
 ## Limitations
