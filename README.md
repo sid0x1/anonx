@@ -184,6 +184,6 @@ licence to do it — you are responsible for what you send through it.
 
 **MIT** licensed — see [LICENSE](LICENSE)
 
-<sub>built with 🧅 by <a href="https://github.com/sid-hack3r">sid-hack3r</a> · stay safe out there</sub>
+<sub>built with 🧅 by <a href="https://github.com/sid-hack3r">sidh4rth</a> · stay safe out there</sub>
 
 </div>
