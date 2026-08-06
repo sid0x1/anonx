@@ -197,13 +197,13 @@ you with a working network.
 
 ## 🛣️ Roadmap
 
-**✅ Shipped in `v1` — bigger shields**
+**✅ Shipped in `v1.1` — bigger shields**
 - `anonx leaktest` — hammers DNS / IPv6 / kill-switch / transparent-proxy leaks and scores you
 - **Choose your exit country** — `anonx exit de`, `anonx exit us` (`ExitNodes` + `StrictNodes`)
 - **Bridges** (`snowflake`) — reach Tor even where it's censored, with auto-fallback if it can't bootstrap
 - `anonx panic` — instantly drop every connection, restore your identity and flush DNS caches
 
-**✅ Shipped in `v1` — smaller fingerprint**
+**✅ Shipped in `v1.1` — smaller fingerprint**
 - **Forced UTC timezone** while anonymous (a big region fingerprint), restored on stop
 - **Stream isolation** — a separate Tor circuit per destination on the SOCKS port, so sites can't be correlated
 - **Vendor-preserving MAC** option (`KEEP_MAC_VENDOR=1` in `/etc/anonx.conf`) for routers that block unknown OUIs

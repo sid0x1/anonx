@@ -20,7 +20,7 @@
 #     sudo anonx repair      # force-restore a half-broken state
 #     sudo anonx enable      # start on boot   (disable removes it)
 #
-#  anonx 1.0.0 — MIT
+#  anonx 1.1 — MIT
 #
 set -o pipefail
 
@@ -41,7 +41,7 @@ case "$INTERVAL" in ''|*[!0-9]*) INTERVAL=180 ;; esac
 NON_TOR="127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16"
 # ----------------------------------------
 
-VERSION="1.0"
+VERSION="1.1"
 AUTHOR="sidh4ck3r"
 
 # colors
@@ -1148,7 +1148,7 @@ mac_rotate(){
 # and show you exactly what changed. Add a line here whenever you change anonx.
 changelog_data(){
 cat <<'EOF'
-#CL# 1.0 2026-08-07 New: exit-country (anonx exit de), leaktest, bridges (Snowflake), panic, stream isolation, UTC timezone, vendor-preserving MAC option
+#CL# 1.1 2026-08-07 New: exit-country (anonx exit de), leaktest, bridges (Snowflake), panic, stream isolation, UTC timezone, vendor-preserving MAC option
 #CL# 1.0 2026-08-07 Never spoof virtual interfaces (docker0, br-*, veth, VPNs) — only real physical NICs
 #CL# 1.0 2026-08-07 Permanently disable systemd's Tor start-limit via a drop-in, so 'start-limit-hit' can't happen for anyone
 #CL# 1.0 2026-08-07 Default IP-rotation interval is now 3 minutes
