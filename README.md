@@ -67,7 +67,7 @@ Status says **ANONYMOUS** / **OFF** in one word, then explains every line — no
 ## 🚀 Install
 
 ```bash
-git clone https://github.com/sid-hack3r/anonx.git
+git clone https://github.com/sid0x1/anonx.git
 cd anonx
 sudo ./install.sh
 ```
@@ -184,6 +184,6 @@ licence to do it — you are responsible for what you send through it.
 
 **MIT** licensed — see [LICENSE](LICENSE)
 
-<sub>built with 🧅 by <a href="https://github.com/sid-hack3r">sidh4rth</a> · stay safe out there</sub>
+<sub>built with 🧅 by <a href="https://github.com/sid0x1">sidh4ck3r</a> · stay safe out there</sub>
 
 </div>

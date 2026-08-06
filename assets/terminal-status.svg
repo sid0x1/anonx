@@ -74,6 +74,6 @@
     <line x1="52" y1="392" x2="700" y2="392" stroke="#21262d" stroke-width="1.5"/>
 
     <text x="52" y="420"><tspan fill="#6e7681">go back to normal:  </tspan><tspan fill="#56d364" font-weight="700">sudo anonx stop</tspan></text>
-    <text x="52" y="446"><tspan fill="#484f58">anonx v1.0 · </tspan><tspan fill="#39c5cf">sidh4rth</tspan></text>
+    <text x="52" y="446"><tspan fill="#484f58">anonx v1.0 · </tspan><tspan fill="#39c5cf">sidh4ck3r</tspan></text>
   </g>
 </svg>
