@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300" role="img" aria-label="anonx — transparent Tor gateway for Linux">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="0.55" stop-color="#12172180"/>
+      <stop offset="1" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="word" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#bc8cff"/>
+      <stop offset="0.5" stop-color="#a371f7"/>
+      <stop offset="1" stop-color="#39c5cf"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#a371f7" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#a371f7" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#a371f7" flood-opacity="0.35"/>
+    </filter>
+    <style>
+      .mono{font-family:'JetBrains Mono','Fira Code','SFMono-Regular',ui-monospace,Consolas,monospace;}
+      .sans{font-family:'Segoe UI',Roboto,-apple-system,Helvetica,Arial,sans-serif;}
+    </style>
+  </defs>
+
+  <rect x="2" y="2" width="1196" height="296" rx="22" fill="url(#bg)" stroke="#30363d" stroke-width="1.5"/>
+  <ellipse cx="300" cy="150" rx="360" ry="220" fill="url(#glow)"/>
+
+  <!-- onion / circuit motif -->
+  <g stroke="#39c5cf" fill="none" opacity="0.10">
+    <circle cx="1010" cy="150" r="42"/>
+    <circle cx="1010" cy="150" r="74"/>
+    <circle cx="1010" cy="150" r="106"/>
+    <circle cx="1010" cy="150" r="138"/>
+  </g>
+  <g stroke="#a371f7" fill="none" opacity="0.12">
+    <path d="M872 150 H1148 M1010 12 V288"/>
+    <circle cx="1010" cy="150" r="6" fill="#39c5cf" stroke="none"/>
+  </g>
+
+  <!-- 3D extruded wordmark -->
+  <g class="mono" font-size="150" font-weight="800" letter-spacing="2">
+    <text x="79" y="185" fill="#1d1533">anonx</text>
+    <text x="77" y="183" fill="#2a2045">anonx</text>
+    <text x="75" y="181" fill="#3a2d5c">anonx</text>
+    <text x="72" y="178" fill="url(#word)" filter="url(#soft)" stroke="#d7bbff" stroke-width="0.6">anonx</text>
+  </g>
+
+  <!-- tagline -->
+  <text x="80" y="236" class="sans" font-size="27" font-weight="600" fill="#c9d1d9">transparent Tor gateway for Linux</text>
+
+  <!-- feature chips -->
+  <g class="mono" font-size="15">
+    <g>
+      <rect x="80"  y="256" width="150" height="30" rx="15" fill="#a371f720" stroke="#a371f7" stroke-opacity="0.5"/>
+      <text x="155" y="276" fill="#d7bbff" text-anchor="middle">no proxychains</text>
+    </g>
+    <g>
+      <rect x="242" y="256" width="132" height="30" rx="15" fill="#39c5cf20" stroke="#39c5cf" stroke-opacity="0.5"/>
+      <text x="308" y="276" fill="#8ee6ec" text-anchor="middle">MAC spoofing</text>
+    </g>
+    <g>
+      <rect x="386" y="256" width="100" height="30" rx="15" fill="#3fb95020" stroke="#3fb950" stroke-opacity="0.5"/>
+      <text x="436" y="276" fill="#7ee787" text-anchor="middle">DNS-safe</text>
+    </g>
+    <g>
+      <rect x="498" y="256" width="132" height="30" rx="15" fill="#d2992220" stroke="#d29922" stroke-opacity="0.5"/>
+      <text x="564" y="276" fill="#e3b341" text-anchor="middle">IPv6 blocked</text>
+    </g>
+    <g>
+      <rect x="642" y="256" width="124" height="30" rx="15" fill="#f8514920" stroke="#f85149" stroke-opacity="0.5"/>
+      <text x="704" y="276" fill="#ff9a92" text-anchor="middle">kill-switch</text>
+    </g>
+  </g>
+
+  <!-- version tag -->
+  <g class="mono">
+    <rect x="1086" y="26" width="86" height="30" rx="15" fill="#39c5cf20" stroke="#39c5cf" stroke-opacity="0.6"/>
+    <text x="1129" y="46" font-size="16" fill="#8ee6ec" text-anchor="middle" font-weight="700">v1.0</text>
+    <text x="1172" y="76" font-size="14" fill="#8b949e" text-anchor="end">by sid-hack3r</text>
+  </g>
+</svg>

@@ -1,39 +1,70 @@
-# anonx
+<!-- ───────────────────────────  anonx  ─────────────────────────── -->
 
-A transparent Tor gateway for Debian/Kali in a single shell script.
+<div align="center">
 
-`anonx start` pushes **every TCP connection and every DNS query on the machine**
-through Tor, randomizes your MAC, blocks IPv6, and rotates the exit IP on a timer.
-No `proxychains` prefix, no per-app SOCKS settings — curl, apt, your browser, a
-Python script, all of it goes through Tor because the kernel puts it there.
+<img src="assets/banner.svg" alt="anonx — transparent Tor gateway for Linux" width="100%">
 
-```
-   ANONYMOUS   everything on this machine leaves through Tor
-────────────────────────────────────────────────────────
-  ✔  Tor         running · fully connected to the Tor network
-  ✔  Firewall    locked · anything not going through Tor is blocked
-  ✔  Public IP   185.220.101.178 · a Tor exit node, not you
-  ✔  MAC eth0    ea:52:86:8f:c8:eb fake (real aa:bb:cc:dd:ee:ff)
-                 · your internet goes out through this link
-  ✔  IPv6        blocked · Tor is IPv4-only, so v6 would expose you
-  ✔  DNS         inside Tor · your ISP cannot see the sites you look up
-  ✔  New IP      automatic · every 30s
-────────────────────────────────────────────────────────
-```
+<br>
 
-## What it actually does
+<a href="#-install"><img src="https://img.shields.io/badge/install-in%2030%20seconds-A371F7?style=for-the-badge&labelColor=0d1117" alt="install"></a>
+<img src="https://img.shields.io/badge/Bash-4EAA25?style=for-the-badge&logo=gnubash&logoColor=white&labelColor=0d1117" alt="bash">
+<img src="https://img.shields.io/badge/Tor-7E4798?style=for-the-badge&logo=torproject&logoColor=white&labelColor=0d1117" alt="tor">
+<img src="https://img.shields.io/badge/Kali%20·%20Debian-557C94?style=for-the-badge&logo=kalilinux&logoColor=white&labelColor=0d1117" alt="platform">
+<img src="https://img.shields.io/badge/license-MIT-39C5CF?style=for-the-badge&labelColor=0d1117" alt="license">
 
-| Layer | Action |
-|---|---|
-| TCP | `nat OUTPUT` redirects every SYN to Tor's `TransPort` (9040) |
-| DNS | port 53 (udp+tcp) is redirected to Tor's `DNSPort` (5353); `resolv.conf` is pinned to `127.0.0.1` and made immutable so NetworkManager can't rewrite it |
-| Kill switch | the last `filter OUTPUT` rule is `REJECT` — if Tor dies, traffic stops instead of leaking |
-| IPv6 | dropped entirely (Tor's transparent proxy is IPv4-only, so v6 is a pure leak vector) |
-| MAC | randomized through NetworkManager's `cloned-mac-address`, which survives reconnects (a plain `macchanger` spoof gets reverted by NM) |
-| Exit IP | `SIGNAL NEWNYM` on the control port every *N* seconds, interval configurable |
-| LAN | DHCP, the gateway and RFC1918 ranges stay reachable, so the link keeps its lease |
+<br><br>
 
-## Install
+<b>One command puts your whole machine behind Tor.</b><br>
+<sub>Every TCP connection · every DNS query · a spoofed MAC · IPv6 killed · exit IP on a timer — no <code>proxychains</code>, no per-app config.</sub>
+
+<br><br>
+
+<img src="assets/terminal-status.svg" alt="anonx status — ANONYMOUS via Tor" width="86%">
+
+</div>
+
+<br>
+
+## ✨ Why anonx
+
+Most people chain `proxychains` in front of one app and hope. anonx works one
+layer lower — in the **kernel firewall** — so *everything* leaves through Tor
+whether it knows about Tor or not: your browser, `apt`, `curl`, a Python script,
+a stray telemetry ping. If Tor ever drops, a kill-switch rule stops traffic
+instead of leaking it.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**🧅 Full-system, not per-app**
+Kernel `nat` redirects every SYN into Tor's `TransPort`. Nothing has to opt in.
+
+**🛡️ Hard kill-switch**
+The last firewall rule is `REJECT`. No Tor → no traffic. Leaks are impossible, not just unlikely.
+
+**🔀 Rotating identity**
+Fresh exit IP every `30s`, `2m`, `1h` — you choose. New MAC on demand too.
+
+</td>
+<td width="50%" valign="top">
+
+**🚫 DNS & IPv6 sealed**
+DNS is forced through Tor and `resolv.conf` is frozen; IPv6 is dropped whole (Tor is IPv4-only).
+
+**🩺 Self-healing**
+`doctor` names the exact layer that broke; `repair` force-restores a half-broken network.
+
+**💬 Speaks human**
+Status says **ANONYMOUS** / **OFF** in one word, then explains every line — no jargon wall.
+
+</td>
+</tr>
+</table>
+
+<br>
+
+## 🚀 Install
 
 ```bash
 git clone https://github.com/sid-hack3r/anonx.git
@@ -41,113 +72,106 @@ cd anonx
 sudo ./install.sh
 ```
 
-The installer pulls the dependencies (`tor`, `macchanger`, `ethtool`,
-`iptables`, `curl`, `xxd`, `iproute2`), appends the transparent-proxy block to
-`/etc/tor/torrc` (keeping a `.pre-anonx` backup) and stops Tor from starting on
-its own — anonx owns its lifecycle.
+The installer checks and pulls every dependency (`tor`, `macchanger`, `ethtool`,
+`iptables`, `curl`, `xxd`, `iproute2`), wires the transparent-proxy block into
+`/etc/tor/torrc` (with a `.pre-anonx` backup), and hands Tor's lifecycle to
+anonx. Remove it any time with `sudo ./uninstall.sh --purge` — it restores your
+network first, so you can never uninstall yourself into a locked firewall.
 
-Remove it with `sudo ./uninstall.sh --purge`, which restores your network first,
-so you can never uninstall yourself into a locked firewall.
+<br>
 
-## Updating
+## ⚡ Commands
 
-```bash
-sudo anonx update
-```
+<div align="center">
+<img src="assets/terminal-commands.svg" alt="anonx commands" width="86%">
+</div>
 
-It downloads the latest script, verifies it parses before replacing anything,
-and keeps the previous copy in `/var/lib/anonx/anonx.prev`. Point it somewhere
-else with `echo 'UPDATE_URL=https://.../anonx' | sudo tee /etc/anonx.conf`.
+<br>
 
-## Usage
+| Command | What it does |
+|---|---|
+| `sudo anonx start` `[time]` | Go anonymous. Optional rotation interval, e.g. `start 30s` |
+| `sudo anonx stop` | Back to your real identity, Tor shut down |
+| `sudo anonx status` | Are you anonymous right now? — in plain words |
+| `sudo anonx ip` | New exit IP immediately |
+| `sudo anonx mac` | New MAC immediately (rebuilds Tor circuits after) |
+| `sudo anonx interval` `<time>` | Set how often the IP changes (`10s` … `1h`) |
+| `sudo anonx doctor` | Layer-by-layer diagnosis of what broke |
+| `sudo anonx repair` | Force everything back to a working network |
+| `sudo anonx update` | Fetch the latest version |
+| `sudo anonx enable` / `disable` | Autostart on boot, or turn that off |
+| `anonx --help` | Full help &nbsp;·&nbsp; `anonx version` shows the banner |
 
-```bash
-sudo anonx start          # go anonymous
-sudo anonx start 30s      # ...and rotate the exit IP every 30 seconds
-sudo anonx status         # live status, in plain words
-sudo anonx ip             # new exit IP right now
-sudo anonx mac            # new MAC right now (rebuilds Tor circuits after)
-sudo anonx interval 2m    # change the rotation interval (saved for next time)
-sudo anonx doctor         # layer-by-layer diagnosis when something is off
-sudo anonx repair         # force-restore a half-broken state
-sudo anonx stop           # back to your real identity, Tor service stopped
-sudo anonx enable         # start automatically on boot   (disable = remove)
-sudo anonx update         # fetch the latest version
-anonx --help              # full help    (anonx version = version banner)
-```
+Time format: `30s` seconds · `5m` minutes · `1h` hours (minimum `10s`, because
+Tor rate-limits new circuits below that).
 
-Interval accepts `10s`, `90s`, `2m`, `1h` or a plain number of seconds. The
-minimum is 10s because Tor rate-limits `NEWNYM` below that.
+<br>
 
-`anonx` re-executes itself through `sudo` if you forget it. That matters: every
-check it makes (iptables rules, the Tor control cookie, the permanent MAC) is
-root-only, and as a normal user they all fail silently — you'd get a status
-screen full of red crosses while everything was actually fine.
-
-## Verifying it works
+## 🔍 Verify it works
 
 ```bash
-curl https://check.torproject.org/api/ip     # {"IsTor":true,"IP":"..."}
-curl -6 https://ipv6.google.com              # must fail — v6 is blocked
-dig +short whoami.akamai.net @ns1-1.akamaitech.net   # a Tor exit, not your ISP
+curl https://check.torproject.org/api/ip     # → {"IsTor":true,"IP":"..."}
+curl -6 https://ipv6.google.com              # → must FAIL (v6 is blocked)
 ```
 
-The status screen shows the same three facts, plus your spoofed MAC and the
-rotation state.
+<br>
 
-## Design notes
+## 🧠 How it works
 
-Two failure modes drove most of the code, both of which look identical from the
-desk — *"the network is connected but nothing loads"*:
+| Layer | What anonx does |
+|---|---|
+| **TCP** | `nat OUTPUT` redirects every SYN to Tor's `TransPort` (9040) |
+| **DNS** | port 53 → Tor's `DNSPort` (5353); `resolv.conf` pinned to `127.0.0.1` and made immutable |
+| **Kill switch** | last `filter OUTPUT` rule is `REJECT` — Tor dies, traffic stops |
+| **IPv6** | dropped entirely (Tor's transparent proxy is IPv4-only) |
+| **MAC** | randomized via NetworkManager's `cloned-mac-address`, so it survives reconnects |
+| **Exit IP** | `SIGNAL NEWNYM` on the control port every *N* seconds |
+| **LAN** | DHCP, gateway and RFC1918 stay reachable, so the link keeps its lease |
+
+<details>
+<summary><b>Design notes — two bugs that shaped the whole tool</b></summary>
+
+<br>
 
 **Changing the MAC tears down Tor.** A MAC change bounces the link, every TCP
-connection Tor holds dies with it, and Tor does not always rebuild its guard
-connections on its own. If the firewall is already forcing all traffic into Tor
-at that moment, the machine goes completely dark. So `start` randomizes the MAC
-*first*, waits for the gateway to answer, and only then starts Tor; `anonx mac`
-restarts Tor after the bounce and unlocks the firewall if Tor doesn't come back.
+connection Tor holds dies with it, and Tor doesn't always rebuild its guards on
+its own. If the firewall is already forcing traffic into Tor at that moment, the
+machine goes dark. So `start` randomizes the MAC **first**, waits for the gateway
+to answer, and only then starts Tor.
 
-**`Bootstrapped 100%` is not the same as "the ports are open".** Tor's
-`TransPort` accepts connections the instant the daemon starts, long before it has
-a single circuit. Locking the firewall at that point produces a perfect blackout.
-`anonx` polls `GETINFO status/bootstrap-phase` on the control port, then fetches a
-real URL through SOCKS, and only locks after both succeed. After locking, it
-fetches once more through the transparent path and **rolls the whole thing back**
-if that fails — a failed `start` always leaves you with a working network.
+**`Bootstrapped 100%` ≠ "ready".** Tor's `TransPort` accepts connections the
+instant the daemon starts, long before it has a circuit. Locking the firewall
+there is a perfect blackout. anonx polls the control port, fetches a real URL
+through SOCKS, and only locks after **both** succeed — then verifies the locked
+path and **rolls back automatically** if it fails. A failed `start` always leaves
+you with a working network.
 
-The rotation daemon also watches itself: two dead cycles in a row and it restarts
-Tor rather than leaving you offline.
+</details>
 
-## Troubleshooting
+<br>
 
-| Symptom | Fix |
-|---|---|
-| "connected" but nothing loads | `sudo anonx doctor` — it tells you which layer died |
-| status shows everything off/red but anonx is running | you ran it without `sudo` on an older build; re-install |
-| DNS dead after a crash or reboot | `sudo anonx repair` (an interrupted run can leave `resolv.conf` immutable at `127.0.0.1`) |
-| `tor` in the terminal prints "Address already in use" | that's the Tor service anonx started already holding 9050/9040/9051 — nothing is wrong; check it with `sudo anonx status` |
-| Wi-Fi won't reconnect after a MAC change | `sudo anonx repair` resets `cloned-mac-address` back to `permanent` on every profile |
+## ⚠️ Limitations
 
-## Limitations
+- `ping 8.8.8.8` fails while locked — ICMP can't ride Tor. That's the design; websites still work.
+- UDP (except DNS) is dropped: video calls, WireGuard and most games won't work while locked.
+- Tor hides your **IP, not your habits** — logging into your own accounts still identifies you. For browsing, use the Tor Browser.
+- MAC randomization only hides you from the local network segment.
+- Tested on Kali (NetworkManager + `tor@default`); other Debian derivatives should work.
 
-* ICMP can't travel over Tor — `ping 8.8.8.8` will fail while locked. That's the
-  design, not a bug; the gateway still pings.
-* UDP (except DNS, which is translated) is dropped. Video calls, WireGuard, most
-  games won't work while locked.
-* Tor hides your IP, not your habits. Logging into your own accounts, browser
-  fingerprinting and timing correlation all still identify you. For serious
-  browsing use the Tor Browser (it runs its own Tor on 9150 and is unaffected by
-  anonx).
-* MAC randomization only hides you from the local network segment.
-* Tested on Kali (NetworkManager + `tor@default`). Other Debian derivatives should
-  work; non-NM setups fall back to `macchanger`.
+<br>
 
-## Legal
+## 📜 Legal
 
 For your own machines, lab networks and authorized testing only. Circumventing
 network controls you don't own is illegal in most places, and Tor is not a
-license to do it. You are responsible for what you send through it.
+licence to do it — you are responsible for what you send through it.
 
-## License
+<br>
 
-MIT — see [LICENSE](LICENSE).
+<div align="center">
+
+**MIT** licensed — see [LICENSE](LICENSE)
+
+<sub>built with 🧅 by <a href="https://github.com/sid-hack3r">sid-hack3r</a> · stay safe out there</sub>
+
+</div>

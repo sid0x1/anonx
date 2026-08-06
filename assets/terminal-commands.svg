@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 388" width="820" height="388" role="img" aria-label="anonx commands">
+  <defs>
+    <filter id="drop2" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="20" stdDeviation="26" flood-color="#000000" flood-opacity="0.55"/>
+    </filter>
+    <linearGradient id="tbar2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#21262d"/><stop offset="1" stop-color="#161b22"/>
+    </linearGradient>
+    <style>.m2{font-family:'JetBrains Mono','Fira Code','SFMono-Regular',ui-monospace,Consolas,monospace;font-size:15.5px;}</style>
+  </defs>
+
+  <rect x="30" y="34" width="760" height="320" rx="16" fill="#04060a"/>
+  <g filter="url(#drop2)">
+    <rect x="30" y="24" width="760" height="320" rx="16" fill="#0b0e14" stroke="#30363d" stroke-width="1.2"/>
+  </g>
+  <path d="M46 24 H774 A16 16 0 0 1 790 40 V66 H30 V40 A16 16 0 0 1 46 24 Z" fill="url(#tbar2)"/>
+  <line x1="30" y1="66" x2="790" y2="66" stroke="#30363d" stroke-width="1"/>
+  <circle cx="56" cy="45" r="7" fill="#ff5f56"/>
+  <circle cx="80" cy="45" r="7" fill="#ffbd2e"/>
+  <circle cx="104" cy="45" r="7" fill="#27c93f"/>
+  <text x="410" y="50" class="m2" font-size="14" fill="#8b949e" text-anchor="middle">sid@kali: ~  —  anonx --help</text>
+
+  <g class="m2">
+    <text x="52" y="104"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#58a6ff" font-weight="700">start</tspan><tspan fill="#e3b341"> 30s</tspan><tspan fill="#484f58">       # go anonymous, new IP every 30s</tspan></text>
+    <text x="52" y="138"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#58a6ff" font-weight="700">status</tspan><tspan fill="#484f58">        # are you anonymous right now?</tspan></text>
+    <text x="52" y="172"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#58a6ff" font-weight="700">ip</tspan><tspan fill="#484f58">            # grab a fresh exit IP now</tspan></text>
+    <text x="52" y="206"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#58a6ff" font-weight="700">mac</tspan><tspan fill="#484f58">           # grab a fresh MAC now</tspan></text>
+    <text x="52" y="240"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#58a6ff" font-weight="700">interval</tspan><tspan fill="#e3b341"> 2m</tspan><tspan fill="#484f58">  # change the rotation timer</tspan></text>
+    <text x="52" y="274"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#bc8cff" font-weight="700">doctor</tspan><tspan fill="#484f58">        # diagnose where the network died</tspan></text>
+    <text x="52" y="308"><tspan fill="#56d364" font-weight="700">❯ </tspan><tspan fill="#8b949e">sudo anonx </tspan><tspan fill="#f85149" font-weight="700">stop</tspan><tspan fill="#484f58">          # back to your real identity</tspan></text>
+  </g>
+</svg>
