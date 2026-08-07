@@ -189,6 +189,43 @@ human_dur(){
 
 line(){ printf "${D}────────────────────────────────────────────────────────${N}\n"; }
 
+# ---------------- the status box ----------------
+# `status` is the one screen people actually read, so it gets a real frame:
+# everything lines up in one rectangle with the version and author sitting in
+# the top edge instead of trailing off the bottom.
+#
+# Drawing a box means padding each row to the same *visible* width, which is
+# neither the byte count (✔ and · are multibyte) nor the raw string length
+# (colour escapes are invisible). vlen strips the escapes and counts characters
+# — which needs a UTF-8 locale, set once below. That locale also pins ip,
+# macchanger and systemctl to English, which is what every parse in here reads.
+case "${LC_ALL}${LC_CTYPE}${LANG}" in
+  *UTF-8*|*utf8*|*UTF8*) ;;
+  *) if locale -a 2>/dev/null | grep -qix 'C\.utf-\?8'; then export LC_ALL=C.UTF-8
+     elif locale -a 2>/dev/null | grep -qix 'en_US\.utf-\?8'; then export LC_ALL=en_US.UTF-8
+     fi ;;
+esac
+
+BOXW=72                                    # visible characters inside the frame
+vlen(){ local s; s=$(printf '%s' "$1" | sed 's/\x1b\[[0-9;]*m//g'); printf '%s' "${#s}"; }
+rep(){ local i out=""; for ((i=0; i<$2; i++)); do out="$out$1"; done; printf '%s' "$out"; }
+
+# top edge with a label sitting in it:  ╭─ anonx v1.2 · sidh4ck3r ────────╮
+box_top(){
+  local label=" $1 " fill
+  fill=$((BOXW + 1 - $(vlen "$label")))
+  [ "$fill" -lt 0 ] && fill=0
+  printf "  ${D}╭─${N}%s${D}%s╮${N}\n" "$label" "$(rep ─ "$fill")"
+}
+box_sep(){ printf "  ${D}├%s┤${N}\n" "$(rep ─ $((BOXW + 2)))"; }
+box_end(){ printf "  ${D}╰%s╯${N}\n" "$(rep ─ $((BOXW + 2)))"; }
+# one row, padded so the right wall stays put whatever colours are inside
+box_row(){
+  local pad=$((BOXW - $(vlen "$1")))
+  [ "$pad" -lt 0 ] && pad=0
+  printf "  ${D}│${N} %s%*s ${D}│${N}\n" "$1" "$pad" ""
+}
+
 # Every command prints the same shape: title, rule, rows, rule. `ip`, `mac`,
 # `exit` and `bridges` used to start mid-air with a bare sentence while stop and
 # leaktest had a proper header — one tool with three different looks.
@@ -884,8 +921,11 @@ repair(){
   doctor
 }
 
-# one status line: icon, label, value — all rows share the same two columns
-row(){ printf "  %s  ${W}%-11s${N} %s\n" "$1" "$2" "$3"; }
+# one status line inside the box: icon, label, value — every row shares the
+# same two columns, so the whole board reads as a table
+row(){ box_row "$(printf "%s  ${W}%-11s${N} %s" "$1" "$2" "$3")"; }
+# a continuation line under a row: no icon, no label, just the second column
+subrow(){ box_row "$(printf "   ${W}%-11s${N} %s" "" "$1")"; }
 # Only two verdicts on the status board: green tick = this layer hides you,
 # red cross = it does not. HM is for "root cannot read this", not for a state.
 YES="${G}✔${N}"; NO="${R}✘${N}"; HM="${Y}!${N}"
@@ -902,15 +942,16 @@ status(){
   # which is the honest picture — nothing about you is covered.
   # ---- headline: one word that says what is going on ----
   echo
+  box_top "${A}${BOLD}anonx${N} ${W}v${VERSION}${N} ${D}·${N} ${A}${AUTHOR}${N}"
   if [ "$locked" -eq 1 ] && [ "$is_tor" = "true" ]; then
-    printf "  ${CHIP_ON} ANONYMOUS ${N}  ${D}everything on this machine leaves through Tor${N}\n"
+    box_row "${CHIP_ON} ANONYMOUS ${N}  ${D}everything here leaves through Tor${N}"
   elif [ "$locked" -eq 1 ]; then
-    printf "  ${CHIP_BAD} NOT WORKING ${N}  ${R}locked, but traffic is not reaching Tor${N}\n"
-    printf "  ${D}fix it:${N} ${G}sudo anonx doctor${N}  ${D}or${N}  ${G}sudo anonx repair${N} ${D}(gets your network back)${N}\n"
+    box_row "${CHIP_BAD} NOT WORKING ${N}  ${R}locked, but traffic is not reaching Tor${N}"
+    box_row "${D}fix it:${N} ${G}sudo anonx doctor${N}  ${D}·${N}  ${G}sudo anonx repair${N}"
   else
-    printf "  ${CHIP_OFF} OFF ${N}  ${R}you are on your real identity — nothing is hidden${N}\n"
+    box_row "${CHIP_OFF} OFF ${N}  ${R}your real identity — nothing is hidden${N}"
   fi
-  line
+  box_sep
 
   # ---- Tor ----
   if tor_active && [ "$pct" = "100" ]; then
@@ -924,7 +965,7 @@ status(){
     # Still red: a running Tor that nothing is routed into hides nothing.
     row "$NO"  "Tor"      "${R}running, but not carrying your traffic${N} ${D}· sudo anonx start${N}"
   elif [ "$locked" -eq 1 ]; then
-    row "$NO"  "Tor"      "${R}stopped while the firewall is still locked${N} ${D}· sudo anonx repair${N}"
+    row "$NO"  "Tor"      "${R}stopped, firewall still locked${N} ${D}· sudo anonx repair${N}"
   else
     row "$NO"  "Tor"      "${R}stopped${N} ${D}· nothing is being routed through Tor${N}"
   fi
@@ -942,7 +983,7 @@ status(){
   elif [ -z "$rip" ]; then
     row "$NO"  "Public IP" "${R}no internet right now${N} ${D}· sudo anonx doctor${N}"
   elif [ "$locked" -eq 1 ]; then
-    row "$NO"  "Public IP" "${R}${rip}${N} ${D}· this is YOUR real IP — Tor is not carrying traffic${N}"
+    row "$NO"  "Public IP" "${R}${rip}${N} ${D}· your real IP — Tor is not carrying it${N}"
   else
     row "$NO"  "Public IP" "${R}${BOLD}${rip}${N} ${D}· your real IP, visible to every site${N}"
   fi
@@ -962,7 +1003,7 @@ status(){
     else
       row "$NO"  "MAC $dev" "${R}${cm:-?}${N} ${D}· real hardware address, not changed${N}"
     fi
-    printf "  %s  ${W}%-11s${N} %s\n" " " "" "$last"
+    subrow "$last"
   done
 
   # ---- IPv6 ----
@@ -980,27 +1021,28 @@ status(){
   elif [ "$dns" = "127.0.0.1" ]; then
     row "$NO"  "DNS"      "${R}pointed at Tor, but Tor is not listening${N} ${D}· sudo anonx repair${N}"
   else
-    row "$NO"  "DNS"      "${R}${dns:-?}${N} ${D}· your router/ISP resolver sees every site you visit${N}"
+    row "$NO"  "DNS"      "${R}${dns:-?}${N} ${D}· your router/ISP sees every site you visit${N}"
   fi
 
   # ---- rotation ----
   if rotator_alive; then
     row "$YES" "New IP"   "${G}automatic${N} ${D}· every${N} ${Y}$(human_dur "$INTERVAL")${N}"
     if [ -f "$STATE/rotate.log" ]; then
-      last=$(tail -1 "$STATE/rotate.log")
-      [ -n "$last" ] && printf "  %s  ${W}%-11s${N} ${D}last change: %s${N}\n" " " "" "$last"
+      last=$(tail -1 "$STATE/rotate.log" | awk '{print $2, "→", $NF}')
+      [ -n "$last" ] && subrow "${D}last change ${last}${N}"
     fi
   else
     row "$NO"  "New IP"   "${R}off${N} ${D}· will change every $(human_dur "$INTERVAL") once started${N}"
   fi
 
-  line
+  box_sep
   if [ "$locked" -eq 1 ]; then
-    printf "  ${D}go back to normal:${N}  ${G}sudo anonx stop${N}\n"
+    box_row "${D}go back to normal:${N}  ${G}sudo anonx stop${N}"
   else
-    printf "  ${D}go anonymous:${N}  ${G}sudo anonx start${N}   ${D}(add a time, e.g.${N} ${G}sudo anonx start 30s${N}${D})${N}\n"
+    box_row "${D}go anonymous:${N}  ${G}sudo anonx start${N}  ${D}or${N} ${G}anonx start 30s${N}"
   fi
-  sig
+  box_end
+  echo
 }
 
 # ---------------- doctor: where exactly is the network dying ----------------
@@ -1351,6 +1393,7 @@ changelog_data(){
 cat <<'EOF'
 #CL# 1.2 2026-08-07 New: `anonx run <cmd>` — push one tool (python script, pip, curl) through Tor on its own circuit
 #CL# 1.2 2026-08-07 Commands are flexible now: aliases (on/off, newip, leak, fix, check) and any unambiguous prefix
+#CL# 1.2 2026-08-07 status is drawn in one aligned box now, with the version and author in the top edge
 #CL# 1.2 2026-08-07 status is red when you are NOT hidden and green when you are — no more calm grey on your real identity
 #CL# 1.2 2026-08-07 leaktest: fixed the false "DNS leak" (the nat redirect made a captured query look like an escaped one) and added an app/proxy check
 #CL# 1.2 2026-08-07 Every command now prints the same shape: title, rule, aligned rows, rule
