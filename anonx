@@ -41,16 +41,19 @@ case "$INTERVAL" in ''|*[!0-9]*) INTERVAL=180 ;; esac
 NON_TOR="127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16"
 # ----------------------------------------
 
-VERSION="1.1"
+VERSION="1.2"
 AUTHOR="sidh4ck3r"
 
 # colors
 R=$'\e[31m'; G=$'\e[32m'; Y=$'\e[33m'; B=$'\e[34m'; C=$'\e[36m'; M=$'\e[35m'
 W=$'\e[1;37m'; D=$'\e[2m'; N=$'\e[0m'; BOLD=$'\e[1m'
 
-# state chips (coloured background) for the one-word verdict in `status`
+# state chips (coloured background) for the one-word verdict in `status`.
+# Two colours, one meaning each: green = you are hidden, red = you are not.
+# "off" is red on purpose — a calm grey used to read like everything was fine
+# while the machine was sitting on its real identity.
 CHIP_ON=$'\e[42m\e[30m\e[1m'    # green  — anonymous
-CHIP_OFF=$'\e[43m\e[30m\e[1m'   # yellow — off, real identity
+CHIP_OFF=$'\e[41m\e[97m\e[1m'   # red    — off, real identity exposed
 CHIP_BAD=$'\e[41m\e[97m\e[1m'   # red    — locked but broken
 
 # accent colour, freshly picked on every run — the banner and the author tag
@@ -66,13 +69,58 @@ banner(){
 
 sig(){ printf "  ${D}anonx v%s${N} ${D}·${N} ${A}%s${N}\n" "$VERSION" "$AUTHOR"; }
 
+# One verb, many spellings. People type what they remember — `newip`, `new-ip`,
+# `rotate`, `--status`, `st`, `off` — and getting the usage screen instead of
+# the thing they asked for is pure friction. Every entry point goes through
+# here, so an alias works exactly like the canonical name everywhere.
+# Prints the canonical verb, or "?<word>" if it recognises nothing.
+VERBS="start stop restart status doctor repair ip mac interval exit bridges
+       leaktest run panic update changelog enable disable version help"
+canon(){
+  local c
+  c=$(printf '%s' "${1:-}" | tr 'A-Z_' 'a-z-' | sed 's/^--*//')
+  case "$c" in
+    ''|help|h|usage|commands)                  echo help ;;
+    start|on|up|go|anon|anonymous)             echo start ;;
+    stop|off|down|normal|real)                 echo stop ;;
+    restart|reload)                            echo restart ;;
+    status|st|state|check|am-i-anonymous)      echo status ;;
+    doctor|diag|diagnose|debug|why)            echo doctor ;;
+    repair|fix|recover|unbreak)                echo repair ;;
+    ip|newip|new-ip|rotate|newnym|renew|circuit) echo ip ;;
+    mac|newmac|new-mac|macchange|spoof)        echo mac ;;
+    interval|every|timer|rotation)             echo interval ;;
+    exit|exit-country|exitnode|country|node)   echo exit ;;
+    bridges|bridge|snowflake|censored)         echo bridges ;;
+    leaktest|leak|leaks|test|audit|scan)       echo leaktest ;;
+    run|exec|through|via|wrap)                 echo run ;;
+    panic|kill|abort|emergency|sos)            echo panic ;;
+    update|upgrade|self-update)                echo update ;;
+    changelog|changes|history|whats-new)       echo changelog ;;
+    enable|autostart|boot)                     echo enable ;;
+    disable|no-autostart|no-boot)              echo disable ;;
+    version|v|ver)                             echo version ;;
+    # Not a known word: accept it anyway if it is an unambiguous prefix of one
+    # command (`stat` -> status, `leak` -> leaktest). Ambiguous stubs like `st`
+    # stay unknown, because guessing between stop and status would be reckless.
+    *)
+      local v m="" n=0
+      for v in $VERBS; do
+        case "$v" in "$c"*) m="$v"; n=$((n+1)) ;; esac
+      done
+      [ "$n" -eq 1 ] && echo "$m" || echo "?$c" ;;
+  esac
+}
+CMD=$(canon "${1:-}")
+
 # Every reading this tool does is root-only: iptables/ip6tables rules, the Tor
 # control auth cookie, and the permanent MAC (SIOCETHTOOL). Run as a normal user
 # those all fail *silently* and the output lies — "?% bootstrapped", "Firewall
 # lock: off", "MAC NOT spoofed" — while anonx is in fact running fine. So never
 # run unprivileged: re-exec through sudo instead.
-# help and version read nothing, so they never need to ask for a password
-case "${1:-}" in ''|help|--help|-h|version|--version|-v|changelog) ANONX_NOSUDO=1 ;; esac
+# help and version read nothing, so they never need to ask for a password.
+# `run` is deliberately here too: it must launch your tool as YOU, not as root.
+case "$CMD" in help|version|changelog|run) ANONX_NOSUDO=1 ;; esac
 
 if [ "$(id -u)" -ne 0 ] && [ -z "$ANONX_NOSUDO" ]; then
   if command -v sudo >/dev/null 2>&1; then
@@ -140,6 +188,12 @@ human_dur(){
 }
 
 line(){ printf "${D}────────────────────────────────────────────────────────${N}\n"; }
+
+# Every command prints the same shape: title, rule, rows, rule. `ip`, `mac`,
+# `exit` and `bridges` used to start mid-air with a bare sentence while stop and
+# leaktest had a proper header — one tool with three different looks.
+title(){ printf "\n  ${W}${BOLD}anonx %s${N}%s\n" "$1" "${2:+  ${D}· $2${N}}"; line; }
+endblock(){ line; [ -n "$1" ] && printf "  %s\n" "$1"; }
 need_root(){ [ "$(id -u)" -eq 0 ] || { echo "${R}Run as root:  sudo anonx $1${N}"; exit 1; }; }
 ok(){   printf "  ${G}✔${N} %s\n" "$1"; }
 bad(){  printf "  ${R}✘${N} %s\n" "$1"; }
@@ -160,6 +214,20 @@ tor_ctl(){
 }
 
 newnym(){ tor_ctl 'SIGNAL NEWNYM' | grep -q '250 OK'; }
+
+# The one and only "give me a different exit IP" routine. `anonx ip`, the
+# background rotator and `anonx exit <cc>` each used to carry their own copy of
+# signal -> wait -> re-read, with a different sleep and a different idea of what
+# counted as failure. They all call this now.
+# Prints the new exit IP. 1 = control port refused, 2 = Tor stopped answering.
+new_circuit(){
+  local settle="${1:-3}" ip
+  newnym || return 1
+  sleep "$settle"
+  ip=$(exit_ip_addr) || return 2
+  [ -n "$ip" ] || return 2
+  printf '%s' "$ip"
+}
 
 # 0-100, empty if the control port is not answering
 tor_bootstrap_pct(){
@@ -478,13 +546,25 @@ cur_mac(){  mac_cur  "$IFACE"; }
 perm_mac(){ mac_perm "$IFACE"; }
 exit_ip(){ timeout 20 curl -s https://check.torproject.org/api/ip 2>/dev/null; }
 
+# One request, both answers. status, leaktest and the rotators used to each
+# re-grep the same JSON in their own way; they read these two variables instead.
+# Returns 1 when there was no answer at all (no internet / Tor down).
+SEEN_IP=""; SEEN_ISTOR=""
+exit_ip_read(){
+  local json
+  json=$(exit_ip)
+  SEEN_ISTOR=$(printf '%s' "$json" | grep -o '"IsTor":[a-z]*' | cut -d: -f2)
+  SEEN_IP=$(printf '%s'    "$json" | grep -o '"IP":"[^"]*"'   | cut -d'"' -f4)
+  [ -n "$json" ]
+}
+
 # just the address. Retries: right after NEWNYM the fresh circuit needs a moment,
 # and a single failed probe used to print an empty IP.
 exit_ip_addr(){
-  local i out
+  local i
   for i in 1 2 3 4 5; do
-    out=$(exit_ip | sed -n 's/.*"IP":"\([^"]*\)".*/\1/p')
-    [ -n "$out" ] && { echo "$out"; return 0; }
+    exit_ip_read
+    [ -n "$SEEN_IP" ] && { echo "$SEEN_IP"; return 0; }
     sleep 3
   done
   return 1
@@ -521,7 +601,7 @@ start(){
   mkdir -p "$STATE"
   ANONX_ARMED=1
 
-  echo "${W}${BOLD}  anonx — going anonymous...${N}"; line
+  title "start" "going anonymous"
 
   # save original firewall + MAC + DNS once
   [ -f "$STATE/iptables.bak" ]  || iptables-save  > "$STATE/iptables.bak"  2>/dev/null
@@ -690,8 +770,7 @@ rotator(){
       randmac
       tor_restart && wait_tor_bootstrap    # link bounced → Tor needs new circuits
     fi
-    newnym
-    nip=$(exit_ip_addr)
+    nip=$(new_circuit)
     if [ -n "$nip" ]; then
       fails=0
       echo "$(date '+%F %T')  rotated -> $nip" >> "$STATE/rotate.log"
@@ -733,16 +812,19 @@ rotator_alive(){ [ -f "$STATE/rotator.pid" ] && kill -0 "$(cat "$STATE/rotator.p
 # `anonx interval` shows it, `anonx interval 45s` sets it (live if running)
 interval_cmd(){
   need_root interval
+  title "interval" "how often your exit IP changes"
   if [ -z "$1" ]; then
-    echo "  rotation interval: ${Y}$(human_dur "$INTERVAL")${N}   ${D}(change: sudo anonx interval 45s)${N}"
-    return 0
+    info "interval:      ${Y}$(human_dur "$INTERVAL")${N}"
+    info "change it:     ${G}sudo anonx interval 45s${N}"
+    endblock; return 0
   fi
   set_interval "$1"
-  ok "rotation interval set to ${Y}$(human_dur "$INTERVAL")${N} ${D}(saved, used on every start)${N}"
+  ok "interval:      ${Y}$(human_dur "$INTERVAL")${N} ${D}· saved, used on every start${N}"
   if rotator_alive; then
     start_rotator
-    ok "running rotator restarted with the new interval (pid $(cat "$STATE/rotator.pid"))"
+    ok "rotator:       restarted with the new interval ${D}(pid $(cat "$STATE/rotator.pid"))${N}"
   fi
+  endblock
 }
 
 stop_rotator(){
@@ -750,23 +832,39 @@ stop_rotator(){
   rm -f "$STATE/rotator.pid"
 }
 
+# anonx started the service, so anonx shuts it down again — otherwise `status`
+# keeps reporting "Tor service: running" long after you went back to normal.
+# (Tor Browser is unaffected: it runs its own tor on 9150.)
+tor_stop(){
+  tor_active || return 0
+  systemctl stop tor@default 2>/dev/null || systemctl stop tor 2>/dev/null
+  ! tor_active
+}
+
+# The shared "put this machine back on its real identity" sequence. stop, repair
+# and panic each used to spell the same six steps out again in a slightly
+# different order — and the order matters (DNS unlocked before resolv.conf is
+# rewritten, firewall opened before the link is asked to settle), so it lives
+# here once. Pass "quiet" to run it without printing a line per step.
+deanonymize(){
+  local say=1; [ "$1" = quiet ] && say=0
+  stop_rotator;      [ $say = 1 ] && ok "rotation stopped"
+  unlock_dns;        [ $say = 1 ] && ok "resolv.conf unlocked"
+  restore_firewall;  [ $say = 1 ] && ok "firewall restored (IPv4 + IPv6 open)"
+  restore_dns;       [ $say = 1 ] && ok "DNS handed back to NetworkManager"
+  [ -s "$STATE/timezone.bak" ] && { tz_restore; [ $say = 1 ] && ok "timezone restored"; }
+  restore_mac;       [ $say = 1 ] && ok "MAC restored → $(cur_mac)"
+  if tor_active; then
+    tor_stop && { [ $say = 1 ] && ok "Tor service stopped"; } || \
+      { [ $say = 1 ] && warn "Tor service still running (stop it: sudo systemctl stop tor@default)"; }
+  fi
+  return 0
+}
+
 stop(){
   need_root stop
-  echo "${W}${BOLD}  anonx — restoring normal networking...${N}"; line
-  stop_rotator; ok "rotation stopped"
-  restore_firewall; ok "firewall restored (IPv4 + IPv6 open)"
-  restore_dns; ok "DNS restored (resolv.conf unlocked)"
-  [ -s "$STATE/timezone.bak" ] && { tz_restore; ok "timezone restored"; }
-  restore_mac
-  ok "MAC restored → $(cur_mac)"
-  # anonx started the service, so anonx shuts it down again — otherwise `status`
-  # keeps reporting "Tor service: running" long after you went back to normal.
-  # (Tor Browser is unaffected: it runs its own tor on 9150.)
-  if tor_active; then
-    systemctl stop tor@default 2>/dev/null || systemctl stop tor 2>/dev/null
-    tor_active && warn "Tor service still running (stop it: sudo systemctl stop tor@default)" \
-                || ok "Tor service stopped"
-  fi
+  title "stop" "restoring normal networking"
+  deanonymize
   net_settle && ok "link up (gateway reachable)" || warn "link not settled yet — give NM a few seconds"
   line
   echo "  ${Y}You are now on your REAL identity again.${N}"
@@ -776,19 +874,10 @@ stop(){
 # locked, resolv.conf stuck immutable, etc.)
 repair(){
   need_root repair
-  echo "${W}${BOLD}  anonx — repairing network state...${N}"; line
-  stop_rotator
-  unlock_dns; ok "resolv.conf unlocked"
-  restore_firewall; ok "iptables + ip6tables flushed to ACCEPT"
-  restore_dns; ok "DNS handed back to NetworkManager"
-  restore_mac; ok "MAC set back to permanent on all profiles"
-  [ -s "$STATE/timezone.bak" ] && { tz_restore; ok "timezone restored"; }
-  # same end state as `stop`: Tor off, so `status` doesn't say "running" while
-  # anonx is clearly off
-  if tor_active; then
-    systemctl stop tor@default 2>/dev/null || systemctl stop tor 2>/dev/null
-    ok "Tor service stopped"
-  fi
+  title "repair" "forcing the network back to a working state"
+  # same steps and same end state as `stop` (Tor off, so `status` doesn't say
+  # "running" while anonx is clearly off) — repair just adds the NM kick below
+  deanonymize
   systemctl restart NetworkManager >/dev/null 2>&1
   net_settle && ok "gateway reachable" || bad "still no gateway — check the cable/wifi"
   line
@@ -797,17 +886,20 @@ repair(){
 
 # one status line: icon, label, value — all rows share the same two columns
 row(){ printf "  %s  ${W}%-11s${N} %s\n" "$1" "$2" "$3"; }
-YES="${G}✔${N}"; NO="${R}✘${N}"; DOT="${D}•${N}"; HM="${Y}!${N}"
+# Only two verdicts on the status board: green tick = this layer hides you,
+# red cross = it does not. HM is for "root cannot read this", not for a state.
+YES="${G}✔${N}"; NO="${R}✘${N}"; HM="${Y}!${N}"
 
 status(){
-  local locked=0 tor_json is_tor rip pct dev cm pm dns last
+  local locked=0 is_tor rip pct dev cm pm dns last
   firewall_locked && locked=1
-  tor_json=$(exit_ip)
-  is_tor=$(echo "$tor_json" | grep -o '"IsTor":[a-z]*' | cut -d: -f2)
-  rip=$(echo "$tor_json"    | grep -o '"IP":"[^"]*"'  | cut -d'"' -f4)
+  exit_ip_read; is_tor="$SEEN_ISTOR"; rip="$SEEN_IP"
   pct=$(tor_bootstrap_pct)
   dns=$(grep -m1 nameserver /etc/resolv.conf 2>/dev/null | awk '{print $2}')
 
+  # Every row below reads the same way: green tick = this layer is hiding you,
+  # red cross = it is not. When anonx is off that means the whole board is red,
+  # which is the honest picture — nothing about you is covered.
   # ---- headline: one word that says what is going on ----
   echo
   if [ "$locked" -eq 1 ] && [ "$is_tor" = "true" ]; then
@@ -816,7 +908,7 @@ status(){
     printf "  ${CHIP_BAD} NOT WORKING ${N}  ${R}locked, but traffic is not reaching Tor${N}\n"
     printf "  ${D}fix it:${N} ${G}sudo anonx doctor${N}  ${D}or${N}  ${G}sudo anonx repair${N} ${D}(gets your network back)${N}\n"
   else
-    printf "  ${CHIP_OFF} OFF ${N}  ${D}you are on your real identity — nothing is hidden${N}\n"
+    printf "  ${CHIP_OFF} OFF ${N}  ${R}you are on your real identity — nothing is hidden${N}\n"
   fi
   line
 
@@ -828,31 +920,31 @@ status(){
   elif tor_active && [ "$locked" -eq 1 ]; then
     row "$HM"  "Tor"      "${Y}running${N} ${D}· cannot read progress (control port silent)${N}"
   elif tor_active; then
-    # anonx is OFF but Tor happens to be running (autostart / another app) —
-    # that's none of our business, so don't alarm the user
-    row "$DOT" "Tor"      "${D}running · not managed by anonx (start to go anonymous)${N}"
+    # anonx is OFF but Tor happens to be running (autostart / another app).
+    # Still red: a running Tor that nothing is routed into hides nothing.
+    row "$NO"  "Tor"      "${R}running, but not carrying your traffic${N} ${D}· sudo anonx start${N}"
   elif [ "$locked" -eq 1 ]; then
     row "$NO"  "Tor"      "${R}stopped while the firewall is still locked${N} ${D}· sudo anonx repair${N}"
   else
-    row "$DOT" "Tor"      "${D}stopped${N}"
+    row "$NO"  "Tor"      "${R}stopped${N} ${D}· nothing is being routed through Tor${N}"
   fi
 
   # ---- firewall ----
   if [ "$locked" -eq 1 ]; then
     row "$YES" "Firewall" "${G}locked${N} ${D}· anything not going through Tor is blocked${N}"
   else
-    row "$DOT" "Firewall" "${D}off · normal networking, apps connect directly${N}"
+    row "$NO"  "Firewall" "${R}off${N} ${D}· normal networking, apps connect directly${N}"
   fi
 
   # ---- what the world sees ----
   if [ "$is_tor" = "true" ]; then
     row "$YES" "Public IP" "${Y}${BOLD}${rip}${N} ${D}· a Tor exit node, not you${N}"
-  elif [ -z "$tor_json" ]; then
+  elif [ -z "$rip" ]; then
     row "$NO"  "Public IP" "${R}no internet right now${N} ${D}· sudo anonx doctor${N}"
   elif [ "$locked" -eq 1 ]; then
     row "$NO"  "Public IP" "${R}${rip}${N} ${D}· this is YOUR real IP — Tor is not carrying traffic${N}"
   else
-    row "$DOT" "Public IP" "${W}${rip:-unknown}${N} ${D}· your real IP, visible to every site${N}"
+    row "$NO"  "Public IP" "${R}${BOLD}${rip}${N} ${D}· your real IP, visible to every site${N}"
   fi
 
   # ---- MAC per link ----
@@ -868,7 +960,7 @@ status(){
     elif [ -z "$pm" ]; then
       row "$HM"  "MAC $dev" "${Y}${cm:-?}${N} ${D}(cannot read the real one)${N}"
     else
-      row "$DOT" "MAC $dev" "${W}${cm:-?}${N} ${D}real hardware address, not changed${N}"
+      row "$NO"  "MAC $dev" "${R}${cm:-?}${N} ${D}· real hardware address, not changed${N}"
     fi
     printf "  %s  ${W}%-11s${N} %s\n" " " "" "$last"
   done
@@ -879,7 +971,7 @@ status(){
   elif [ "$locked" -eq 1 ]; then
     row "$NO"  "IPv6"     "${R}open while locked${N} ${D}· sudo anonx restart${N}"
   else
-    row "$DOT" "IPv6"     "${D}open · normal${N}"
+    row "$NO"  "IPv6"     "${R}open${N} ${D}· sites can reach you over v6 as yourself${N}"
   fi
 
   # ---- DNS ----
@@ -888,7 +980,7 @@ status(){
   elif [ "$dns" = "127.0.0.1" ]; then
     row "$NO"  "DNS"      "${R}pointed at Tor, but Tor is not listening${N} ${D}· sudo anonx repair${N}"
   else
-    row "$DOT" "DNS"      "${W}${dns:-?}${N} ${D}· your router/ISP resolver${N}"
+    row "$NO"  "DNS"      "${R}${dns:-?}${N} ${D}· your router/ISP resolver sees every site you visit${N}"
   fi
 
   # ---- rotation ----
@@ -899,7 +991,7 @@ status(){
       [ -n "$last" ] && printf "  %s  ${W}%-11s${N} ${D}last change: %s${N}\n" " " "" "$last"
     fi
   else
-    row "$DOT" "New IP"   "${D}off · will change every $(human_dur "$INTERVAL") once started${N}"
+    row "$NO"  "New IP"   "${R}off${N} ${D}· will change every $(human_dur "$INTERVAL") once started${N}"
   fi
 
   line
@@ -914,7 +1006,7 @@ status(){
 # ---------------- doctor: where exactly is the network dying ----------------
 doctor(){
   local gw pct
-  echo "${W}${BOLD}  anonx doctor — layer by layer${N}"; line
+  title "doctor" "layer by layer"
 
   # L2/L3
   gw=$(ip route show default 2>/dev/null | awk '/default/{print $3; exit}')
@@ -976,65 +1068,69 @@ doctor(){
 # ---- exit country: route out through a chosen country ----
 exit_country(){
   need_root exit
-  tor_active || { bad "Tor is not running — go anonymous first: ${G}sudo anonx start${N}"; return 1; }
-  local cc="$1"
+  title "exit" "choosing which country you leave Tor from"
+  tor_active || { bad "Tor:           ${R}not running${N} ${D}· go anonymous first: ${G}sudo anonx start${N}"; endblock; return 1; }
+  local cc="$1" ip
   if [ -z "$cc" ] || [ "$cc" = "off" ] || [ "$cc" = "any" ]; then
     tor_ctl 'SETCONF ExitNodes= StrictNodes=0' >/dev/null
     rm -f "$STATE/exit"
-    ok "exit country cleared — Tor picks any exit again"
-    newnym; local ip; ip=$(exit_ip_addr); [ -n "$ip" ] && info "new exit IP: ${Y}$ip${N}"
-    return 0
+    ok "exit country:  ${W}any${N} ${D}· cleared, Tor picks freely again${N}"
+    ip=$(new_circuit); [ -n "$ip" ] && ok "exit IP now:   ${Y}${BOLD}$ip${N}"
+    endblock; return 0
   fi
   cc=$(echo "$cc" | tr 'A-Z' 'a-z')
-  case "$cc" in [a-z][a-z]) ;; *) bad "use a 2-letter country code, e.g. ${G}anonx exit de${N} (or ${G}exit off${N})"; return 1 ;; esac
+  case "$cc" in
+    [a-z][a-z]) ;;
+    *) bad "country code:  ${R}'$cc' is not a 2-letter code${N}"
+       info "try:           ${G}anonx exit de${N}  ${D}·${N}  ${G}anonx exit us${N}  ${D}·${N}  ${G}anonx exit off${N}"
+       endblock; return 1 ;;
+  esac
   if tor_ctl "SETCONF ExitNodes={$cc} StrictNodes=1" | grep -q '250 OK'; then
     echo "$cc" > "$STATE/exit"
-    ok "exit country set to ${W}${cc^^}${N} (strict)"
-    newnym; sleep 3
-    local ip; ip=$(exit_ip_addr)
-    if [ -n "$ip" ]; then info "exit IP now: ${Y}$ip${N}"
-    else warn "no exit found in ${cc^^} yet — Tor may have few/no exits there; try ${G}anonx exit off${N}"; fi
+    ok "exit country:  ${W}${cc^^}${N} ${D}· strict, Tor will not use any other${N}"
+    ip=$(new_circuit)
+    if [ -n "$ip" ]; then ok "exit IP now:   ${Y}${BOLD}$ip${N}"
+    else warn "exit IP now:   ${Y}none found in ${cc^^}${N} ${D}· few or no exits there — ${G}anonx exit off${N}"; fi
   else
-    bad "Tor refused the exit setting (control port)"; return 1
+    bad "control port:  ${R}Tor refused the exit setting${N}"; endblock; return 1
   fi
+  endblock
 }
 
 # ---- panic: instantly cut everything and return to your real identity ----
 panic(){
   need_root panic
-  echo "${R}${BOLD}  PANIC — cutting all traffic and restoring your identity${N}"
-  stop_rotator >/dev/null 2>&1
+  printf "\n  ${CHIP_BAD} PANIC ${N}  ${R}cutting all traffic and restoring your identity${N}\n"; line
   command -v conntrack >/dev/null 2>&1 && conntrack -F >/dev/null 2>&1 && ok "dropped every open connection"
-  unlock_dns; restore_dns; restore_firewall
-  [ -s "$STATE/timezone.bak" ] && { tz_restore; ok "timezone restored"; }
+  # same restore as stop/repair, silent — panic prints one summary line instead
+  deanonymize quiet
   command -v resolvectl >/dev/null 2>&1 && resolvectl flush-caches 2>/dev/null && ok "flushed DNS caches"
-  restore_mac
-  if tor_active; then systemctl stop tor@default 2>/dev/null || systemctl stop tor 2>/dev/null; fi
-  ok "Tor stopped, firewall open, MAC + DNS restored"
-  net_settle && ok "back on your real network" || warn "give NetworkManager a few seconds"
-  echo "  ${Y}You are on your REAL identity. Nothing is going through Tor.${N}"
+  ok "Tor stopped, firewall open, MAC + DNS + timezone restored"
+  net_settle && ok "network:       back on your real link" || warn "network:       give NetworkManager a few seconds"
+  endblock "${R}${BOLD}You are on your REAL identity. Nothing is going through Tor.${N}"
 }
 
 # ---- bridges: reach Tor where it is blocked (Snowflake pluggable transport) ----
 bridges_cmd(){
   need_root bridges
   local TORRC=/etc/tor/torrc mode="$1"
+  title "bridges" "reaching Tor where it is blocked"
   if [ "$mode" = "off" ]; then
     sed -i '/# --- anonx bridges/,/# --- end anonx bridges ---/d' "$TORRC"
-    ok "bridges disabled — using the normal Tor network"
-    tor_active && { info "restarting Tor..."; tor_restart && wait_tor_bootstrap && ok "Tor back on the normal network"; }
-    return 0
+    ok "bridges:       ${W}off${N} ${D}· using the normal Tor network${N}"
+    tor_active && { info "restarting Tor..."; tor_restart && wait_tor_bootstrap && ok "Tor:           back on the normal network"; }
+    endblock; return 0
   fi
   # need the snowflake client
   local snow
   snow=$(command -v snowflake-client || command -v snowflake || echo /usr/bin/snowflake-client)
   if [ ! -x "$snow" ]; then
-    bad "snowflake client not installed"
-    info "install it, then run this again:  ${G}sudo apt install snowflake-client${N}"
-    return 1
+    bad "snowflake:     ${R}client not installed${N}"
+    info "install it:    ${G}sudo apt install snowflake-client${N} ${D}· then run this again${N}"
+    endblock; return 1
   fi
   if grep -q "anonx bridges" "$TORRC"; then
-    ok "bridges already enabled"
+    ok "bridges:       ${W}already enabled${N}"
   else
     cat >> "$TORRC" <<EOF
 
@@ -1044,28 +1140,70 @@ ClientTransportPlugin snowflake exec $snow
 Bridge snowflake 192.0.2.3:80 2B280B23E1107BB62ABFC40DDCC8824814F80A72 fingerprint=2B280B23E1107BB62ABFC40DDCC8824814F80A72 url=https://1098762253.rsc.cdn77.org/ fronts=www.cdn77.com,www.phpmyadmin.net ice=stun:stun.l.google.com:19302,stun:stun.antisip.com:3478 utls-imitate=hellorandomizedalpn
 # --- end anonx bridges ---
 EOF
-    ok "Snowflake bridge configured"
+    ok "bridges:       ${W}Snowflake configured${N}"
   fi
   info "restarting Tor over bridges (can take up to a minute)..."
   if tor_restart && wait_tor_bootstrap && tor_works; then
-    ok "connected to Tor through Snowflake bridges"
+    ok "Tor:           connected through Snowflake bridges"
   else
-    bad "could not bootstrap over bridges — reverting to the normal network"
+    bad "Tor:           ${R}could not bootstrap over bridges${N} ${D}· reverting${N}"
     sed -i '/# --- anonx bridges/,/# --- end anonx bridges ---/d' "$TORRC"
     tor_restart && wait_tor_bootstrap
-    return 1
+    endblock; return 1
   fi
+  endblock
+}
+
+# Did a DNS query aimed at $1 really leave this machine?
+#
+# It is NOT enough to see whether the query succeeded. Under the lock, the nat
+# rule redirects every port-53 packet to Tor's DNSPort, so `dig @8.8.8.8` gets
+# a perfectly good answer that never left the box — the old test read that
+# success as a leak and reported "DNS leak" on a setup that was in fact sealed.
+# What separates the two: Tor's DNSPort only answers A/AAAA/PTR and replies
+# NOTIMP to anything else, while a real resolver answers a TXT query with
+# records. So ask for TXT — records in the answer mean the packet truly reached
+# the outside resolver.
+dns_escapes(){
+  local out
+  out=$(timeout 8 dig +time=3 +tries=1 TXT example.com "@$1" 2>/dev/null) || return 1
+  printf '%s' "$out" | grep -q 'status: NOERROR' || return 1     # dropped / NOTIMP → nothing escaped
+  printf '%s' "$out" | grep -qiE '^example\.com\..*[[:space:]]TXT[[:space:]]'
+}
+
+# Sum of packets the "redirect this into Tor" nat rules have captured.
+tor_redirect_pkts(){
+  iptables -t nat -L OUTPUT -n -v -x 2>/dev/null \
+    | awk '/redir ports 9040/{s+=$1} END{printf "%d", s+0}'
+}
+
+# Do tools that speak to a proxy still end up inside Tor? Two proofs:
+#   1. a SOCKS client (what python's requests/PySocks, pip and curl use when you
+#      point them at 127.0.0.1:9050) must come out as a Tor exit;
+#   2. a client aimed at an *outside* proxy must have its connection swallowed
+#      by the transparent redirect — we watch the nat counter move, which is the
+#      only way to tell "went through Tor" from "the proxy was just unreachable".
+app_via_tor(){
+  local out before after
+  out=$(timeout 30 curl -s --socks5-hostname 127.0.0.1:9050 \
+        https://check.torproject.org/api/ip 2>/dev/null)
+  printf '%s' "$out" | grep -q '"IsTor":true' || return 1
+  before=$(tor_redirect_pkts)
+  # 198.51.100.9 is a reserved documentation address: nothing answers there, so
+  # the only thing this measures is which path the SYN took.
+  timeout 6 curl -s -o /dev/null -x http://198.51.100.9:8080 http://example.com 2>/dev/null
+  after=$(tor_redirect_pkts)
+  [ "$after" -gt "$before" ]
 }
 
 # ---- leaktest: prove there is no leak, with a score ----
 leaktest(){
   need_root leaktest
-  echo "${W}${BOLD}  anonx leaktest${N}"; line
-  local pass=0 total=0 json is_tor ip
+  title "leaktest" "scoring every way you could leak"
+  local pass=0 total=0 is_tor ip r
   step(){ total=$((total+1)); }
 
-  json=$(exit_ip); is_tor=$(echo "$json" | grep -o '"IsTor":[a-z]*' | cut -d: -f2)
-  ip=$(echo "$json" | grep -o '"IP":"[^"]*"' | cut -d'"' -f4)
+  exit_ip_read; is_tor="$SEEN_ISTOR"; ip="$SEEN_IP"
 
   step
   if [ "$is_tor" = "true" ]; then ok "Tor routing:   traffic exits via Tor (${Y}$ip${N})"; pass=$((pass+1))
@@ -1080,15 +1218,26 @@ leaktest(){
   else ok "IPv6:          sealed (no v6 escapes)"; pass=$((pass+1)); fi
 
   step
-  # DNS must go through Tor: a direct query to a public resolver must FAIL
-  if timeout 6 dig +short +time=3 +tries=1 example.com @8.8.8.8 >/dev/null 2>&1; then
-    bad "DNS leak:      ${R}a query reached 8.8.8.8 directly${N}"
-  else ok "DNS:           sealed (no query reaches outside resolvers)"; pass=$((pass+1)); fi
+  local esc=""
+  for r in 8.8.8.8 1.1.1.1; do dns_escapes "$r" && esc="$r"; done
+  if [ -n "$esc" ]; then
+    bad "DNS leak:      ${R}a query really reached $esc${N}"
+  else ok "DNS:           sealed (queries are captured by Tor, none reach outside resolvers)"; pass=$((pass+1)); fi
 
   step
   if timeout 15 dig +short +time=5 +tries=1 check.torproject.org @127.0.0.1 -p 5353 >/dev/null 2>&1; then
     ok "DNS via Tor:   names resolve inside Tor"; pass=$((pass+1))
   else bad "DNS via Tor:   ${R}Tor DNSPort not answering${N}"; fi
+
+  step
+  # The question every scripter asks: "my python tool talks to a proxy — does
+  # THAT connection ride Tor?" Proved here with two real clients instead of by
+  # reading the rules: one speaking SOCKS to Tor, one aimed at an outside proxy.
+  if app_via_tor; then
+    ok "Apps:          proxy-using tools (python, curl, pip...) still exit via Tor"; pass=$((pass+1))
+  else
+    bad "Apps:          ${R}a proxy-configured client could reach the net outside Tor${N}"
+  fi
 
   line
   local pct=$((pass*100/total))
@@ -1101,30 +1250,81 @@ leaktest(){
   line
 }
 
+# ---- run: push one command through Tor, on its own circuit ----
+#
+# While anonx is locked every tool is already covered — the transparent redirect
+# catches the connection whether the tool talks straight out or through a proxy
+# of its own. `run` is for the two cases the lock cannot reach: a tool you want
+# isolated on its own circuit (so its traffic is not correlated with the rest of
+# your browsing), and a tool you want anonymous without locking down the whole
+# machine. Needs no root, so it runs as you, not as root.
+run_cmd(){
+  [ $# -eq 0 ] && {
+    title "run" "push one command through Tor, on its own circuit"
+    bad "nothing to run"
+    info "usage:         ${G}anonx run <command>${N}"
+    info "examples:      ${G}anonx run python3 myscript.py${N}"
+    info "               ${G}anonx run curl ifconfig.me${N}"
+    info "               ${G}anonx run pip install requests${N}"
+    endblock; return 1
+  }
+  ss -tln 2>/dev/null | grep -q '127.0.0.1:9050' || {
+    title "run" "push one command through Tor, on its own circuit"
+    bad "Tor SOCKS:     ${R}port 9050 is not open${N}"
+    info "start Tor:     ${G}sudo anonx start${N}"
+    endblock; return 1
+  }
+  if command -v torsocks >/dev/null 2>&1; then
+    # torsocks hooks connect()/getaddrinfo() itself, so even a tool that ignores
+    # every proxy setting cannot open a direct socket or resolve behind our
+    # back. -i gives this command its own SOCKS credentials, i.e. its own
+    # circuit, so its traffic is not correlated with the rest of your browsing.
+    #
+    # The proxy variables have to go: with them set, the tool dials
+    # 127.0.0.1:9050 itself and torsocks refuses the connection (it blocks
+    # loopback on purpose, since that is how a DNS query leaks to a local
+    # resolver). torsocks is doing that job already — the variables would only
+    # ask it to proxy a connection to the proxy.
+    unset ALL_PROXY HTTP_PROXY HTTPS_PROXY all_proxy http_proxy https_proxy
+    exec torsocks -i "$@"
+  fi
+  # No torsocks: fall back to the proxy variables. socks5h = Tor resolves the
+  # name, so the hostname never reaches a local resolver. Both cases are set —
+  # some tools read only the lowercase pair, some only the uppercase.
+  local p="socks5h://127.0.0.1:9050"
+  export ALL_PROXY="$p" HTTP_PROXY="$p" HTTPS_PROXY="$p"
+  export all_proxy="$p" http_proxy="$p" https_proxy="$p"
+  warn "torsocks:      ${Y}not installed${N} ${D}· falling back to proxy variables${N}"
+  info "install it:    ${G}sudo apt install torsocks${N} ${D}· a tool that ignores the variables could still connect directly${N}"
+  exec "$@"
+}
+
 ip_rotate(){
   need_root ip
-  local before after
+  local before after rc
+  title "ip" "asking Tor for a different exit"
   before=$(exit_ip_addr)
-  echo "${C}Rotating exit IP...${N}  ${D}(was ${before:-?})${N}"
-  newnym || { bad "Tor control port refused NEWNYM"; return 1; }
-  sleep 5
-  after=$(exit_ip_addr)
-  if [ -z "$after" ]; then
-    bad "could not reach Tor after rotation"
+  info "was:           ${W}${before:-unknown}${N}"
+  after=$(new_circuit 5); rc=$?
+  if [ $rc -eq 1 ]; then
+    bad "control port:  ${R}Tor refused NEWNYM${N}"; endblock; return 1
+  elif [ -z "$after" ]; then
+    bad "new exit IP:   ${R}could not reach Tor after rotation${N}"
   elif [ "$after" = "$before" ]; then
-    printf "  ${Y}•${N} exit IP still ${Y}${BOLD}%s${N} ${D}(Tor reused the circuit — try again)${N}\n" "$after"
+    warn "new exit IP:   ${Y}${BOLD}$after${N} ${D}(unchanged — Tor reused the circuit, try again)${N}"
   else
-    printf "  ${G}✔${N} new exit IP: ${Y}${BOLD}%s${N}\n" "$after"
+    ok "new exit IP:   ${Y}${BOLD}$after${N}"
   fi
+  endblock
 }
 
 mac_rotate(){
   need_root mac
-  echo "${C}Randomizing MAC...${N}"
+  title "mac" "randomizing your hardware address"
   randmac
   local dev
   for dev in $(active_ifaces); do
-    printf "  ${M}%-6s${N} → %s\n" "$dev" "$(macchanger -s "$dev" 2>/dev/null | awk '/Current MAC/{print $3}')"
+    ok "$(printf '%-14s' "$dev:")${M}$(macchanger -s "$dev" 2>/dev/null | awk '/Current MAC/{print $3}')${N}"
   done
   # The link just bounced: Tor's guard connections are gone and it does not
   # always rebuild them by itself. Restart it so the tunnel comes back.
@@ -1140,6 +1340,7 @@ mac_rotate(){
       fi
     fi
   fi
+  endblock
 }
 
 # ---------------- changelog ----------------
@@ -1148,6 +1349,11 @@ mac_rotate(){
 # and show you exactly what changed. Add a line here whenever you change anonx.
 changelog_data(){
 cat <<'EOF'
+#CL# 1.2 2026-08-07 New: `anonx run <cmd>` — push one tool (python script, pip, curl) through Tor on its own circuit
+#CL# 1.2 2026-08-07 Commands are flexible now: aliases (on/off, newip, leak, fix, check) and any unambiguous prefix
+#CL# 1.2 2026-08-07 status is red when you are NOT hidden and green when you are — no more calm grey on your real identity
+#CL# 1.2 2026-08-07 leaktest: fixed the false "DNS leak" (the nat redirect made a captured query look like an escaped one) and added an app/proxy check
+#CL# 1.2 2026-08-07 Every command now prints the same shape: title, rule, aligned rows, rule
 #CL# 1.1 2026-08-07 uninstall.sh now removes everything by default (binary, state, config, drop-ins, torrc block incl. legacy) with a final clean-check
 #CL# 1.1 2026-08-07 New: exit-country (anonx exit de), leaktest, bridges (Snowflake), panic, stream isolation, UTC timezone, vendor-preserving MAC option
 #CL# 1.0 2026-08-07 Never spoof virtual interfaces (docker0, br-*, veth, VPNs) — only real physical NICs
@@ -1164,7 +1370,7 @@ EOF
 }
 
 changelog(){
-  echo "${W}${BOLD}  anonx changelog${N}"; line
+  title "changelog" "what changed in each version"
   changelog_data | sed 's/^#CL# //' | while read -r ver date rest; do
     printf "  ${C}•${N} ${D}%s${N}  ${W}v%s${N}  %s\n" "$date" "$ver" "$rest"
   done
@@ -1326,6 +1532,8 @@ usage(){
 
   printf "  ${W}STAY SAFE${N}\n"
   printf "    ${G}sudo anonx leaktest${N}         score your setup for DNS / IPv6 / kill-switch leaks\n"
+  printf "    ${G}anonx run${N} ${D}<command>${N}       run one tool through Tor on its own circuit\n"
+  printf "                              ${D}e.g.${N} ${G}anonx run python3 scan.py${N}\n"
   printf "    ${G}sudo anonx bridges${N} ${D}on|off${N}   reach Tor where it's blocked (Snowflake)\n"
   printf "    ${G}sudo anonx panic${N}            cut all traffic and drop back to your real identity NOW\n\n"
 
@@ -1342,6 +1550,12 @@ usage(){
   printf "    ${G}sudo anonx update${N}           fetch the latest version — shows what changed\n"
   printf "    ${G}anonx changelog${N}             what changed in each version\n"
   printf "    ${G}anonx version${N}               show which version this is\n\n"
+
+  printf "  ${W}TYPING SHORTCUTS${N}\n"
+  printf "    Commands are forgiving — every one of these does the same thing:\n"
+  printf "    ${G}anonx status${N} ${D}·${N} ${G}anonx st${N} ${D}·${N} ${G}anonx stat${N} ${D}·${N} ${G}anonx --status${N} ${D}·${N} ${G}anonx check${N}\n"
+  printf "    ${D}so do${N} ${G}on${N}/${G}off${N} ${D}for start/stop,${N} ${G}newip${N}/${G}rotate${N} ${D}for ip,${N} ${G}leak${N} ${D}for leaktest,${N} ${G}fix${N} ${D}for repair.${N}\n"
+  printf "    ${D}Any unambiguous prefix works too.${N}\n\n"
 
   printf "  ${W}TIME FORMAT${N}   ${D}(for start and interval)${N}\n"
   printf "    ${Y}30s${N} seconds   ${Y}5m${N} minutes   ${Y}1h${N} hours   ${D}· minimum 10s, plain number = seconds${N}\n"
@@ -1368,13 +1582,13 @@ usage(){
 # A previous run that died (kill -9, crash, reboot while locked) can leave
 # resolv.conf frozen at 127.0.0.1 with Tor down: everything looks connected and
 # nothing resolves. Warn about it on every invocation.
-if [ "$(id -u)" -eq 0 ] && resolv_stuck && [ "$1" != "start" ] && [ "$1" != "repair" ] && [ "$1" != "stop" ]; then
+if [ "$(id -u)" -eq 0 ] && resolv_stuck && [ "$CMD" != "start" ] && [ "$CMD" != "repair" ] && [ "$CMD" != "stop" ]; then
   warn "leftover anonx DNS lock detected (resolv.conf → 127.0.0.1, Tor DNSPort down)"
   info "fix it with:  ${G}sudo anonx repair${N}"
 fi
 
 # `anonx start 45s` / `anonx start --interval 2m` — one-off or new saved default
-case "$1" in
+case "$CMD" in
   start|restart)
     case "$2" in
       -i|--interval) [ -n "$3" ] && set_interval "$3" ;;
@@ -1382,25 +1596,35 @@ case "$1" in
     esac ;;
 esac
 
-case "$1" in
-  start)    start ;;
-  stop)     stop ;;
-  status)   status ;;
-  doctor)   doctor ;;
-  repair)   repair ;;
-  ip)       ip_rotate ;;
-  mac)      mac_rotate ;;
-  interval) interval_cmd "$2" ;;
+case "$CMD" in
+  start)     start ;;
+  stop)      stop ;;
+  restart)   stop; sleep 2; start ;;
+  status)    status ;;
+  doctor)    doctor ;;
+  repair)    repair ;;
+  ip)        ip_rotate ;;
+  mac)       mac_rotate ;;
+  interval)  interval_cmd "$2" ;;
   exit)      exit_country "$2" ;;
   bridges)   bridges_cmd "$2" ;;
   leaktest)  leaktest ;;
+  run)       shift; run_cmd "$@" ;;
   panic)     panic ;;
   update)    update "$2" ;;
   changelog) changelog ;;
-  help|--help|-h) usage ;;
-  restart)  stop; sleep 2; start ;;
-  enable)   enable_boot ;;
-  disable)  disable_boot ;;
-  version|--version|-v) banner ;;
-  *) usage ;;
+  enable)    enable_boot ;;
+  disable)   disable_boot ;;
+  version)   banner ;;
+  help)      usage ;;
+  # Unknown word: say so and point at the nearest command, instead of dumping
+  # the whole manual and leaving the reader to spot their own typo.
+  *)
+    printf "\n  ${R}✘${N} unknown command: ${W}%s${N}\n" "${CMD#\?}"
+    near=$(for v in $VERBS; do case "$v" in "${CMD#\?}"*) echo "$v" ;; esac; done | head -3)
+    [ -z "$near" ] && near=$(printf '%s\n' start stop status leaktest run help)
+    printf "  ${D}did you mean:${N}"
+    printf " ${G}%s${N}" $near
+    printf "\n  ${D}full list:${N} ${G}anonx help${N}\n\n"
+    exit 1 ;;
 esac

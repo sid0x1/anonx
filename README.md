@@ -126,7 +126,8 @@ changed on this system"*.
 | `sudo anonx mac` | New MAC immediately (rebuilds Tor circuits after) |
 | `sudo anonx interval` `<time>` | Set how often the IP changes (`10s` … `1h`) |
 | `sudo anonx exit` `<cc>` | Leave through a country, e.g. `exit de` (`exit off` = any) |
-| `sudo anonx leaktest` | Score your setup for DNS / IPv6 / kill-switch leaks |
+| `sudo anonx leaktest` | Score your setup for DNS / IPv6 / kill-switch / app leaks |
+| `anonx run` `<command>` | Run one tool through Tor on its own circuit — `anonx run python3 scan.py` |
 | `sudo anonx bridges` `on\|off` | Reach Tor where it's blocked (Snowflake) |
 | `sudo anonx panic` | Cut all traffic and drop to your real identity **now** |
 | `sudo anonx doctor` | Layer-by-layer diagnosis of what broke |
@@ -134,6 +135,10 @@ changed on this system"*.
 | `sudo anonx update` | Fetch the latest version |
 | `sudo anonx enable` / `disable` | Autostart on boot, or turn that off |
 | `anonx --help` | Full help &nbsp;·&nbsp; `anonx version` shows the banner |
+
+**Commands are forgiving.** `status` · `st` · `stat` · `--status` · `check` all work, so do
+`on`/`off` for start/stop, `newip`/`rotate` for `ip`, `leak` for `leaktest`, `fix` for `repair` —
+plus any unambiguous prefix.
 
 Time format: `30s` seconds · `5m` minutes · `1h` hours (minimum `10s`, because
 Tor rate-limits new circuits below that).
@@ -207,6 +212,12 @@ you with a working network.
 - **Forced UTC timezone** while anonymous (a big region fingerprint), restored on stop
 - **Stream isolation** — a separate Tor circuit per destination on the SOCKS port, so sites can't be correlated
 - **Vendor-preserving MAC** option (`KEEP_MAC_VENDOR=1` in `/etc/anonx.conf`) for routers that block unknown OUIs
+
+**✅ Shipped in `v1.2` — flexible and honest**
+- `anonx run <command>` — one tool through Tor on its own circuit, root not required
+- Command aliases and prefixes, and a *did you mean* instead of the whole manual on a typo
+- `status` is red when nothing is hidden, green when it is — one colour per meaning
+- `leaktest` no longer cries "DNS leak" at a sealed machine, and now proves proxy-using tools ride Tor
 
 **🔜 Coming in `v2` — polish & power**
 - `anonx watch` — a live TUI dashboard (IP · circuit · bandwidth · countdown)
