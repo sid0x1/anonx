@@ -217,6 +217,7 @@ you with a working network.
 - `anonx run <command>` — one tool through Tor on its own circuit, root not required
 - Command aliases and prefixes, and a *did you mean* instead of the whole manual on a typo
 - `status` is red when nothing is hidden, green when it is — one colour per meaning
+- `status` is framed in a single aligned box, version and author in the top edge
 - `leaktest` no longer cries "DNS leak" at a sealed machine, and now proves proxy-using tools ride Tor
 
 **🔜 Coming in `v2` — polish & power**
