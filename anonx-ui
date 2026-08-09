@@ -52,6 +52,13 @@ CMD_TIMEOUT = 180         # a start() with a slow bootstrap is allowed to take i
 TOKEN = secrets.token_urlsafe(32)
 _last_seen = time.time()
 
+# read straight out of the tool, so the panel can never claim a version anonx
+# is not actually running
+try:
+    VERSION = re.search(r'^VERSION="([^"]+)"', Path(ANONX).read_text(), re.M).group(1)
+except Exception:
+    VERSION = "?"
+
 # The whole command surface, as fixed argv. A request picks a key; it never
 # supplies a word of the command. `interval` and `exit` take one argument,
 # validated by the regex before it is appended.
@@ -156,13 +163,23 @@ def snapshot():
         except Exception:
             pass
 
+    # states the toggles need to reflect, or they would lie about what is on
+    boot = subprocess.run(["systemctl", "is-enabled", "--quiet", "anonx"],
+                          capture_output=True).returncode == 0
+    try:
+        bridges = "anonx bridges" in Path("/etc/tor/torrc").read_text()
+    except Exception:
+        bridges = False
+
     return {
         "locked": locked, "tor": tor_up, "trans": trans, "dns_ok": dnsport,
         "resolv": resolv, "ipv6_blocked": v6 and locked,
         "ifaces": ifaces, "rotating": rotating,
         "interval": read("interval", "180"), "exit_country": read("exit"),
         "hardened": read("hardened"), "last_rotation": last,
+        "boot": boot, "bridges": bridges,
         "anonymous": locked and tor_up and trans,
+        "version": VERSION,
     }
 
 
@@ -291,8 +308,11 @@ def main():
     print(f"  \033[36m•\033[0m stop it with Ctrl-C\n", flush=True)
 
     # Hand the URL to the invoking human's browser, as them — never as root.
+    # Suppressed when anonx starts us in the background: `anonx start` throwing
+    # an unasked-for browser window at you is not something a tool like this
+    # should do, and the link is printed either way.
     user = os.environ.get("SUDO_USER")
-    if user and user != "root":
+    if user and user != "root" and os.environ.get("ANONX_UI_NO_OPEN") != "1":
         try:
             subprocess.Popen(["runuser", "-u", user, "--", "xdg-open", url],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

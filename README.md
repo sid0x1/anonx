@@ -151,14 +151,21 @@ Tor rate-limits new circuits below that).
 
 ## 🎛️ Control panel
 
+`anonx start` brings the panel up by itself and prints the link. To open it
+without going anonymous first:
+
 ```bash
 sudo anonx ui
 ```
 
-Every manual control behind buttons — start/stop, new IP, new MAC, rotation
-interval, exit country, leak test, panic — with the live state of Tor, the kill
-switch, DNS, IPv6, the browser hardening and each NIC's MAC, refreshed every
-four seconds.
+One big switch for anonymous on/off, smaller ones for boot-autostart and
+bridges, and a status board that says what each reading **means** — not
+"REJECT rule present" but "if Tor stops, traffic stops too". Live state for
+Tor, the kill switch, DNS, IPv6, browser hardening, IP rotation and every
+NIC's MAC, refreshed every four seconds.
+
+`anonx stop` closes it again: a control surface that can switch your anonymity
+off has no business outliving the session it belongs to.
 
 A panel that can run `anonx stop` is a de-anonymization tool if anyone else can
 reach it, so four locks all have to hold on every request:

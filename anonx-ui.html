@@ -8,220 +8,215 @@
 <style>
 /* ─────────────────────────────────────────────────────────────
    anonx control panel
-   One page, no external anything (the server sends a strict CSP).
-   Palette is built from two states and nothing else, same rule the
-   CLI follows: green = you are hidden, red = you are not.
+
+   Two rules the whole page follows:
+     1. green = you are hidden.  red = you are not.  nothing else.
+     2. every reading says what it MEANS in plain words, right under
+        the value. A panel that needs a manual is a panel that gets
+        misread, and misreading this one means thinking you are
+        anonymous when you are not.
    ───────────────────────────────────────────────────────────── */
 :root{
-  --bg:#07080d; --bg2:#0b0d16;
-  --card:rgba(255,255,255,.045);
-  --card-hi:rgba(255,255,255,.075);
-  --stroke:rgba(255,255,255,.09);
-  --stroke-hi:rgba(255,255,255,.18);
-  --txt:#e8eaf2; --dim:#8b90a6; --dimmer:#5a5f75;
-  --on:#22e08a; --on-dim:#0d8f56; --on-glow:rgba(34,224,138,.45);
-  --off:#ff4d6a; --off-dim:#b01e38; --off-glow:rgba(255,77,106,.42);
+  --bg:#06070c; --panel:#0c0e17;
+  --card:rgba(255,255,255,.04); --card-hi:rgba(255,255,255,.07);
+  --stroke:rgba(255,255,255,.10); --stroke-hi:rgba(255,255,255,.2);
+  --txt:#e9ebf3; --dim:#8d92a8; --dimmer:#585d73;
+  --on:#22e08a; --on-d:#0a7d4a; --on-g:rgba(34,224,138,.5);
+  --off:#ff4d6a; --off-d:#9e1830; --off-g:rgba(255,77,106,.45);
   --acc:#8b5cf6; --acc2:#22d3ee; --warn:#fbbf24;
-  --r:18px; --ease:cubic-bezier(.22,.9,.28,1);
+  --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --ease:cubic-bezier(.22,.9,.28,1);
 }
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
 body{
   font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Inter,Roboto,system-ui,sans-serif;
-  color:var(--txt); background:var(--bg); overflow-x:hidden;
+  color:var(--txt);background:var(--bg);min-height:100vh;overflow-x:hidden;
   -webkit-font-smoothing:antialiased;
 }
-/* animated mesh — three slow orbs, GPU only, no layout work */
 body::before{
-  content:""; position:fixed; inset:-30%; z-index:-2; pointer-events:none;
+  content:"";position:fixed;inset:-30%;z-index:-2;pointer-events:none;
   background:
-    radial-gradient(38rem 38rem at 18% 22%, rgba(139,92,246,.20), transparent 62%),
-    radial-gradient(34rem 34rem at 82% 18%, rgba(34,211,238,.16), transparent 60%),
-    radial-gradient(42rem 42rem at 50% 92%, rgba(34,224,138,.13), transparent 62%);
-  filter:blur(28px); animation:drift 26s var(--ease) infinite alternate;
+    radial-gradient(36rem 36rem at 15% 18%,rgba(139,92,246,.17),transparent 62%),
+    radial-gradient(32rem 32rem at 85% 15%,rgba(34,211,238,.13),transparent 60%),
+    radial-gradient(40rem 40rem at 50% 95%,var(--amb,rgba(255,77,106,.13)),transparent 62%);
+  filter:blur(30px);animation:drift 28s var(--ease) infinite alternate;
+  transition:background 1s var(--ease);
 }
-body::after{ /* faint grid, gives the 3D cards something to sit on */
-  content:""; position:fixed; inset:0; z-index:-1; pointer-events:none; opacity:.5;
-  background-image:linear-gradient(var(--stroke) 1px,transparent 1px),
-                   linear-gradient(90deg,var(--stroke) 1px,transparent 1px);
-  background-size:52px 52px;
-  mask-image:radial-gradient(ellipse 78% 58% at 50% 40%,#000 20%,transparent 78%);
-}
-@keyframes drift{
-  0%{transform:translate3d(0,0,0) scale(1)}
-  50%{transform:translate3d(2.5%,-2%,0) scale(1.06)}
-  100%{transform:translate3d(-2%,2.5%,0) scale(1.02)}
-}
-.wrap{max-width:1080px;margin:0 auto;padding:38px 22px 70px}
+body.on{--amb:rgba(34,224,138,.15)}
+@keyframes drift{50%{transform:translate3d(2%,-2%,0) scale(1.05)}100%{transform:translate3d(-2%,2%,0)}}
+.wrap{max-width:960px;margin:0 auto;padding:34px 20px 64px}
 
-/* ── header ─────────────────────────────────────────────── */
-header{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:30px;flex-wrap:wrap}
-.brand{display:flex;align-items:baseline;gap:11px}
+/* ── header ── */
+header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:26px;flex-wrap:wrap}
+.brand{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .brand h1{
-  font-size:27px;font-weight:800;letter-spacing:-.02em;
-  background:linear-gradient(100deg,#fff 10%,var(--acc) 48%,var(--acc2) 88%);
+  font:800 26px/1 var(--mono);letter-spacing:-.02em;
+  background:linear-gradient(100deg,#fff,var(--acc) 50%,var(--acc2));
   -webkit-background-clip:text;background-clip:text;color:transparent;
-  background-size:200% auto; animation:sheen 7s linear infinite;
+  background-size:200% auto;animation:sheen 8s linear infinite;
 }
 @keyframes sheen{to{background-position:200% center}}
-.brand span{font-size:12px;color:var(--dimmer);letter-spacing:.08em;text-transform:uppercase}
-.live{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);
-  padding:7px 13px;border:1px solid var(--stroke);border-radius:99px;background:var(--card)}
+.brand .v{font:600 11px/1 var(--mono);color:var(--dimmer);padding:4px 8px;border:1px solid var(--stroke);border-radius:6px}
+.brand .by{font-size:12px;color:var(--dimmer)}
+.brand .by b{color:var(--dim);font-weight:600}
+.live{display:flex;align-items:center;gap:8px;font:600 11px/1 var(--mono);color:var(--dim);
+  padding:8px 13px;border:1px solid var(--stroke);border-radius:99px;background:var(--card);letter-spacing:.1em}
 .live i{width:7px;height:7px;border-radius:99px;background:var(--dim);animation:blip 2s ease-in-out infinite}
-@keyframes blip{50%{opacity:.25;transform:scale(.8)}}
+@keyframes blip{50%{opacity:.25}}
 
-/* ── the verdict panel ──────────────────────────────────── */
-.hero{
-  position:relative;border-radius:26px;padding:38px 34px;margin-bottom:24px;overflow:hidden;
-  background:linear-gradient(160deg,var(--card-hi),rgba(255,255,255,.015));
-  border:1px solid var(--stroke); backdrop-filter:blur(22px);
-  display:flex;align-items:center;gap:34px;flex-wrap:wrap;
-  transition:border-color .5s var(--ease), box-shadow .6s var(--ease);
+/* ── the one big switch ── */
+.master{
+  display:flex;align-items:center;gap:26px;flex-wrap:wrap;
+  padding:26px 28px;border-radius:22px;margin-bottom:18px;
+  background:linear-gradient(160deg,var(--card-hi),rgba(255,255,255,.014));
+  border:1px solid var(--stroke);backdrop-filter:blur(20px);position:relative;overflow:hidden;
+  transition:box-shadow .6s var(--ease),border-color .6s var(--ease);
 }
-.hero::before{ /* gradient edge that picks up the verdict colour */
-  content:"";position:absolute;inset:0;border-radius:26px;padding:1px;pointer-events:none;
-  background:linear-gradient(135deg,var(--edge,transparent),transparent 42%,transparent 62%,var(--edge,transparent));
-  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
-  -webkit-mask-composite:xor;mask-composite:exclude;
-  transition:background .6s var(--ease);
-}
-body.on  .hero{--edge:var(--on); box-shadow:0 28px 80px -40px var(--on-glow),inset 0 1px 0 rgba(255,255,255,.06)}
-body.off .hero{--edge:var(--off);box-shadow:0 28px 80px -40px var(--off-glow),inset 0 1px 0 rgba(255,255,255,.06)}
+body.on  .master{border-color:rgba(34,224,138,.34);box-shadow:0 24px 70px -40px var(--on-g)}
+body.off .master{border-color:rgba(255,77,106,.3); box-shadow:0 24px 70px -40px var(--off-g)}
 
-/* the orb: three stacked rings + a core, all transform-only */
-.orb{position:relative;width:132px;height:132px;flex:0 0 132px;display:grid;place-items:center}
-.orb .ring{position:absolute;inset:0;border-radius:50%;border:1px solid var(--rc,var(--dim));opacity:.5}
-.orb .ring:nth-child(1){animation:spin 9s linear infinite}
-.orb .ring:nth-child(2){inset:13px;border-style:dashed;animation:spin 14s linear reverse infinite;opacity:.35}
-.orb .ring:nth-child(3){inset:26px;animation:spin 20s linear infinite;opacity:.22}
-@keyframes spin{to{transform:rotate(360deg)}}
-.orb .core{
-  width:66px;height:66px;border-radius:50%;
-  background:radial-gradient(circle at 34% 30%,#fff5,transparent 52%),var(--rc,var(--dim));
-  box-shadow:0 0 46px 8px var(--rg,transparent),inset 0 0 22px rgba(0,0,0,.34);
-  animation:breathe 3.4s ease-in-out infinite; position:relative;
+/* a real switch: track, sliding knob, LED */
+.switch{
+  --w:112px;--h:56px;
+  width:var(--w);height:var(--h);flex:0 0 var(--w);border-radius:99px;cursor:pointer;
+  border:1px solid var(--stroke-hi);position:relative;padding:0;
+  background:linear-gradient(180deg,#05060a,#12141d);
+  box-shadow:inset 0 3px 10px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.05);
+  transition:box-shadow .45s var(--ease);
 }
-@keyframes breathe{50%{transform:scale(1.07)}}
-body.on  .orb{--rc:var(--on); --rg:var(--on-glow)}
-body.off .orb{--rc:var(--off);--rg:var(--off-glow)}
-body.busy .orb .core{animation:breathe .9s ease-in-out infinite}
+.switch::after{ /* the knob */
+  content:"";position:absolute;top:4px;left:4px;width:46px;height:46px;border-radius:50%;
+  background:radial-gradient(circle at 36% 30%,#fff6,transparent 55%),var(--kc,#3a3f52);
+  box-shadow:0 4px 12px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.07),0 0 22px 3px var(--kg,transparent);
+  transition:transform .45s var(--ease),background .45s var(--ease),box-shadow .45s var(--ease);
+}
+body.on .switch{--kc:var(--on);--kg:var(--on-g);box-shadow:inset 0 3px 10px rgba(0,0,0,.8),0 0 34px -6px var(--on-g)}
+body.on .switch::after{transform:translateX(54px)}
+body.off .switch{--kc:var(--off);--kg:var(--off-g)}
+.switch:focus-visible{outline:2px solid var(--acc2);outline-offset:4px}
+.switch:disabled{opacity:.45;cursor:wait}
+body.busy .switch::after{animation:knobpulse .8s ease-in-out infinite}
+@keyframes knobpulse{50%{opacity:.55}}
 
-.verdict{flex:1;min-width:250px}
-.verdict .chip{
-  display:inline-block;font-size:11px;font-weight:800;letter-spacing:.16em;
-  padding:6px 14px;border-radius:99px;margin-bottom:12px;text-transform:uppercase;
-}
-body.on  .chip{background:linear-gradient(90deg,var(--on),var(--on-dim));color:#04150c}
-body.off .chip{background:linear-gradient(90deg,var(--off),var(--off-dim));color:#fff}
-.verdict h2{font-size:34px;font-weight:800;letter-spacing:-.03em;line-height:1.08;margin-bottom:9px}
-.verdict p{color:var(--dim);font-size:14px;max-width:46ch}
-.ipline{margin-top:15px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.ipline code{
-  font:600 15px/1 ui-monospace,"SF Mono",Menlo,monospace;letter-spacing:.01em;
-  padding:9px 14px;border-radius:11px;background:rgba(0,0,0,.34);
-  border:1px solid var(--stroke); color:var(--txt);
-}
+.master .txt{flex:1;min-width:230px}
+.master .state{font:800 30px/1.1 var(--mono);letter-spacing:-.02em;margin-bottom:6px}
+body.on  .master .state{color:var(--on)}
+body.off .master .state{color:var(--off)}
+.master .exp{color:var(--dim);font-size:14px;max-width:44ch}
+.master .hint{margin-top:9px;font-size:12.5px;color:var(--dimmer)}
+.master .hint kbd{font:600 11px/1 var(--mono);padding:3px 6px;border:1px solid var(--stroke);border-radius:5px;color:var(--dim)}
 
-/* ── control grid ───────────────────────────────────────── */
-.grid{display:grid;gap:15px;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));margin-bottom:24px}
+/* ── digital board ── */
+.board{
+  border-radius:18px;border:1px solid var(--stroke);margin-bottom:18px;overflow:hidden;
+  background:linear-gradient(180deg,rgba(4,5,9,.85),rgba(8,10,17,.8));backdrop-filter:blur(16px);
+  position:relative;
+}
+.board::after{ /* scanlines — the "digital readout" texture */
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.4;
+  background:repeating-linear-gradient(180deg,rgba(255,255,255,.028) 0 1px,transparent 1px 3px);
+}
+.board .bh{
+  display:flex;justify-content:space-between;align-items:center;gap:10px;
+  padding:12px 18px;border-bottom:1px solid var(--stroke);
+  font:700 10.5px/1 var(--mono);letter-spacing:.18em;color:var(--dimmer);text-transform:uppercase;
+}
+.rows{display:flex;flex-direction:column}
+.r{
+  display:grid;grid-template-columns:14px 122px minmax(0,1fr);gap:14px;align-items:start;
+  padding:13px 18px;border-bottom:1px solid rgba(255,255,255,.045);
+  transition:background .25s var(--ease);
+}
+.r:last-child{border-bottom:0}
+.r:hover{background:rgba(255,255,255,.028)}
+.led{width:10px;height:10px;border-radius:50%;margin-top:5px;background:var(--dimmer);
+  box-shadow:0 0 10px 2px transparent;transition:background .3s,box-shadow .3s}
+.led.g{background:var(--on); box-shadow:0 0 11px 2px var(--on-g); animation:led 2.6s ease-in-out infinite}
+.led.r{background:var(--off);box-shadow:0 0 11px 2px var(--off-g)}
+.led.y{background:var(--warn);box-shadow:0 0 11px 2px rgba(251,191,36,.45)}
+@keyframes led{50%{opacity:.55}}
+.r .k{font:600 11px/1.45 var(--mono);letter-spacing:.1em;color:var(--dimmer);text-transform:uppercase;padding-top:3px}
+.r .v{font:700 15px/1.35 var(--mono);letter-spacing:.01em;word-break:break-all}
+.r .m{font-size:12.5px;color:var(--dim);margin-top:3px;line-height:1.5}
+.r.g .v{color:var(--on)} .r.r .v{color:var(--off)} .r.y .v{color:var(--warn)}
+
+/* ── toggles + controls ── */
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));margin-bottom:18px}
 .card{
-  position:relative;border-radius:var(--r);padding:19px;
-  background:linear-gradient(158deg,var(--card),rgba(255,255,255,.012));
-  border:1px solid var(--stroke);backdrop-filter:blur(14px);
-  transform-style:preserve-3d;
-  transition:transform .34s var(--ease),border-color .34s var(--ease),box-shadow .34s var(--ease),background .34s var(--ease);
-  will-change:transform;
+  border-radius:16px;padding:17px 18px;border:1px solid var(--stroke);
+  background:linear-gradient(158deg,var(--card),rgba(255,255,255,.012));backdrop-filter:blur(12px);
+  transition:border-color .3s var(--ease),transform .3s var(--ease),box-shadow .3s var(--ease);
 }
-.card:hover{
-  border-color:var(--stroke-hi);background:linear-gradient(158deg,var(--card-hi),rgba(255,255,255,.02));
-  box-shadow:0 24px 52px -26px rgba(0,0,0,.85);
-}
-.card::after{ /* cursor-tracked sheen */
-  content:"";position:absolute;inset:0;border-radius:var(--r);pointer-events:none;opacity:0;
-  background:radial-gradient(16rem 16rem at var(--mx,50%) var(--my,50%),rgba(255,255,255,.09),transparent 62%);
-  transition:opacity .3s var(--ease);
-}
-.card:hover::after{opacity:1}
-.card h3{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--dimmer);margin-bottom:13px;font-weight:700}
-.card .val{font-size:20px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:9px;transform:translateZ(22px)}
-.card .sub{font-size:12.5px;color:var(--dim);margin-top:5px;transform:translateZ(12px)}
-.dot{width:9px;height:9px;border-radius:99px;flex:0 0 9px;box-shadow:0 0 12px 2px currentColor}
-.dot.g{background:var(--on);color:var(--on-glow)}
-.dot.r{background:var(--off);color:var(--off-glow)}
-.dot.y{background:var(--warn);color:rgba(251,191,36,.4)}
+.card:hover{border-color:var(--stroke-hi);transform:translateY(-2px);box-shadow:0 20px 44px -26px rgba(0,0,0,.9)}
+.card h3{font:700 10.5px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--dimmer);margin-bottom:11px}
+.card p{font-size:12.5px;color:var(--dim);margin-top:7px;line-height:1.5}
 
-/* ── buttons ────────────────────────────────────────────── */
-.bar{display:flex;gap:11px;flex-wrap:wrap;margin-bottom:24px}
+.tg{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.tg .lab{font:700 15px/1 var(--mono)}
+.mini{
+  --w:52px;--h:28px;width:var(--w);height:var(--h);flex:0 0 var(--w);border-radius:99px;cursor:pointer;
+  border:1px solid var(--stroke-hi);position:relative;padding:0;background:#0a0c13;
+  box-shadow:inset 0 2px 6px rgba(0,0,0,.8);transition:box-shadow .35s var(--ease);
+}
+.mini::after{
+  content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;
+  background:#3a3f52;box-shadow:0 2px 6px rgba(0,0,0,.7);
+  transition:transform .35s var(--ease),background .35s var(--ease);
+}
+.mini[aria-checked="true"]{box-shadow:inset 0 2px 6px rgba(0,0,0,.6),0 0 20px -4px var(--on-g)}
+.mini[aria-checked="true"]::after{transform:translateX(24px);background:var(--on)}
+.mini:focus-visible{outline:2px solid var(--acc2);outline-offset:3px}
+.mini:disabled{opacity:.45;cursor:not-allowed}
+
+.row{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:11px}
+input{
+  font:700 13.5px/1 var(--mono);color:var(--txt);padding:10px 12px;border-radius:9px;width:84px;
+  background:rgba(0,0,0,.42);border:1px solid var(--stroke);
+  transition:border-color .25s,box-shadow .25s;
+}
+input:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(139,92,246,.16)}
 button{
-  position:relative;font:600 14px/1 inherit;color:var(--txt);cursor:pointer;
-  padding:13px 21px;border-radius:13px;border:1px solid var(--stroke);
-  background:linear-gradient(160deg,var(--card-hi),rgba(255,255,255,.02));
-  overflow:hidden;isolation:isolate;
-  transition:transform .2s var(--ease),box-shadow .28s var(--ease),border-color .28s var(--ease),opacity .2s;
+  position:relative;font:600 13px/1 inherit;color:var(--txt);cursor:pointer;
+  padding:10px 15px;border-radius:9px;border:1px solid var(--stroke);
+  background:var(--card-hi);overflow:hidden;isolation:isolate;
+  transition:transform .2s var(--ease),box-shadow .26s,border-color .26s,opacity .2s;
 }
-button::before{ /* gradient wash that slides in on hover */
-  content:"";position:absolute;inset:0;z-index:-1;opacity:0;
-  background:linear-gradient(120deg,var(--b1,var(--acc)),var(--b2,var(--acc2)));
-  transition:opacity .28s var(--ease);
-}
-button:hover:not(:disabled){transform:translateY(-2px);border-color:transparent;box-shadow:0 14px 32px -14px var(--bg-glow,rgba(139,92,246,.6))}
+button::before{content:"";position:absolute;inset:0;z-index:-1;opacity:0;
+  background:linear-gradient(120deg,var(--acc),var(--acc2));transition:opacity .26s}
+button:hover:not(:disabled){transform:translateY(-2px);border-color:transparent;box-shadow:0 12px 26px -14px rgba(139,92,246,.7)}
 button:hover:not(:disabled)::before{opacity:1}
-button:active:not(:disabled){transform:translateY(0) scale(.985)}
+button:active:not(:disabled){transform:none}
 button:disabled{opacity:.4;cursor:not-allowed}
 button:focus-visible{outline:2px solid var(--acc2);outline-offset:3px}
-button.go{--b1:var(--on);--b2:#12b981;--bg-glow:var(--on-glow)}
-button.go:hover{color:#04150c}
-button.no{--b1:var(--off);--b2:#e11d48;--bg-glow:var(--off-glow)}
-button.danger{border-color:rgba(255,77,106,.3);color:var(--off);--b1:var(--off);--b2:#7f1d2e;--bg-glow:var(--off-glow)}
-button.danger:hover{color:#fff}
+button.danger{color:var(--off);border-color:rgba(255,77,106,.32)}
+button.danger::before{background:linear-gradient(120deg,var(--off),var(--off-d))}
+button.danger:hover{color:#fff;box-shadow:0 12px 26px -14px var(--off-g)}
 
-.row{display:flex;gap:11px;align-items:center;flex-wrap:wrap;margin-top:13px}
-input,select{
-  font:600 13.5px/1 inherit;color:var(--txt);padding:11px 13px;border-radius:11px;
-  background:rgba(0,0,0,.34);border:1px solid var(--stroke);min-width:0;
-  transition:border-color .25s var(--ease),box-shadow .25s var(--ease);
-}
-input{width:96px}
-input:focus,select:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(139,92,246,.16)}
-select{cursor:pointer}
-option{background:var(--bg2)}
+/* ── console ── */
+.console{border-radius:16px;border:1px solid var(--stroke);background:rgba(0,0,0,.5);overflow:hidden;backdrop-filter:blur(12px)}
+.console .bh{display:flex;align-items:center;gap:9px;padding:11px 17px;border-bottom:1px solid var(--stroke);
+  font:700 10.5px/1 var(--mono);letter-spacing:.18em;color:var(--dimmer);text-transform:uppercase}
+.console .bh i{width:9px;height:9px;border-radius:99px;background:#ff5f57;box-shadow:14px 0 0 #febc2e,28px 0 0 #28c840;margin-right:24px}
+.console pre{margin:0;padding:15px 17px;max-height:250px;overflow:auto;white-space:pre-wrap;word-break:break-word;
+  font:12.5px/1.62 var(--mono);color:#9fa7c0}
+.console pre:empty::after{content:"press a control and the output lands here";color:var(--dimmer)}
+.console pre b{color:var(--acc2);font-weight:700}
+.console pre .ok{color:var(--on)} .console pre .er{color:var(--off)}
 
-/* ── console ────────────────────────────────────────────── */
-.console{
-  border-radius:var(--r);border:1px solid var(--stroke);background:rgba(0,0,0,.42);
-  backdrop-filter:blur(14px);overflow:hidden;
-}
-.console .top{
-  display:flex;align-items:center;gap:8px;padding:12px 17px;border-bottom:1px solid var(--stroke);
-  font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--dimmer);font-weight:700;
-}
-.console .top i{width:9px;height:9px;border-radius:99px;background:#ff5f57;box-shadow:15px 0 0 #febc2e,30px 0 0 #28c840;margin-right:26px}
-.console pre{
-  margin:0;padding:17px;max-height:280px;overflow:auto;white-space:pre-wrap;word-break:break-word;
-  font:12.5px/1.65 ui-monospace,"SF Mono",Menlo,monospace;color:#a8b0c8;
-}
-.console pre:empty::after{content:"nothing yet — press a control above";color:var(--dimmer)}
-.console pre b{color:var(--acc2);font-weight:600}
-.console pre .ok{color:var(--on)}
-.console pre .er{color:var(--off)}
-
-/* ── misc ───────────────────────────────────────────────── */
-.note{margin-top:22px;font-size:12.5px;color:var(--dimmer);text-align:center;line-height:1.7}
-.note b{color:var(--dim);font-weight:600}
-.toast{
-  position:fixed;left:50%;bottom:26px;transform:translate(-50%,140%);
-  padding:13px 22px;border-radius:13px;font-size:13.5px;font-weight:600;z-index:99;
-  background:rgba(14,16,24,.94);border:1px solid var(--stroke-hi);backdrop-filter:blur(14px);
-  box-shadow:0 20px 50px -18px rgba(0,0,0,.9); transition:transform .42s var(--ease);
-}
+.foot{margin-top:20px;text-align:center;font-size:12.5px;color:var(--dimmer);line-height:1.75}
+.foot b{color:var(--dim);font-weight:600}
+.toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,150%);z-index:99;
+  padding:12px 20px;border-radius:11px;font:600 13.5px/1 var(--mono);
+  background:rgba(12,14,22,.96);border:1px solid var(--stroke-hi);backdrop-filter:blur(14px);
+  box-shadow:0 18px 44px -16px #000;transition:transform .4s var(--ease)}
 .toast.show{transform:translate(-50%,0)}
 .toast.good{border-color:var(--on);color:var(--on)}
 .toast.bad{border-color:var(--off);color:var(--off)}
-@media (prefers-reduced-motion:reduce){
-  *,*::before,*::after{animation:none!important;transition-duration:.01ms!important}
-}
-@media (max-width:600px){
-  .hero{padding:28px 22px;gap:24px}.verdict h2{font-size:27px}.wrap{padding:26px 15px 54px}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition-duration:.01ms!important}}
+@media (max-width:620px){
+  .r{grid-template-columns:14px 1fr;gap:11px}
+  .r .k{grid-column:2}.r .v,.r .m{grid-column:2}
+  .master{padding:22px}.master .state{font-size:25px}
 }
 </style>
 </head>
@@ -229,227 +224,232 @@ option{background:var(--bg2)}
 <div class="wrap">
 
   <header>
-    <div class="brand"><h1>anonx</h1><span>control panel</span></div>
-    <div class="live"><i id="pulse"></i><span id="livetxt">connecting…</span></div>
+    <div class="brand">
+      <h1>anonx</h1>
+      <span class="v" id="ver">v—</span>
+      <span class="by">author: <b>sidh4ck3r</b></span>
+    </div>
+    <div class="live"><i id="pulse"></i><span id="livetxt">CONNECTING</span></div>
   </header>
 
-  <section class="hero" id="hero">
-    <div class="orb"><div class="ring"></div><div class="ring"></div><div class="ring"></div><div class="core"></div></div>
-    <div class="verdict">
-      <span class="chip" id="chip">checking</span>
-      <h2 id="headline">Reading the machine…</h2>
-      <p id="subline">Asking iptables, Tor and the link layer what state they are actually in.</p>
-      <div class="ipline">
-        <code id="ipbox">—</code>
-        <span class="sub" id="iphint" style="color:var(--dimmer);font-size:12.5px"></span>
-      </div>
+  <!-- one switch, one meaning -->
+  <section class="master">
+    <button class="switch" id="master" role="switch" aria-checked="false" aria-label="anonymous mode"></button>
+    <div class="txt">
+      <div class="state" id="state">CHECKING…</div>
+      <div class="exp" id="exp">Reading what iptables, Tor and your network links are actually doing.</div>
+      <div class="hint">Flip it, or press <kbd>S</kbd> to go anonymous · <kbd>X</kbd> to go back</div>
     </div>
   </section>
 
-  <div class="bar">
-    <button class="go"     data-act="start"   id="b-start">Go anonymous</button>
-    <button class="no"     data-act="stop"    id="b-stop">Back to real</button>
-    <button                data-act="ip">New exit IP</button>
-    <button                data-act="mac">New MAC</button>
-    <button                data-act="leaktest">Leak test</button>
-    <button                data-act="doctor">Doctor</button>
-    <button                data-act="repair">Repair</button>
-    <button class="danger" data-act="panic">Panic</button>
-  </div>
+  <!-- the readout -->
+  <section class="board">
+    <div class="bh"><span>status</span><span id="upd">—</span></div>
+    <div class="rows" id="rows"></div>
+  </section>
 
-  <section class="grid" id="grid"></section>
-
+  <!-- switches you can flip -->
   <section class="grid">
     <div class="card">
-      <h3>Rotation interval</h3>
-      <div class="val"><span id="iv">—</span></div>
-      <div class="sub">How often Tor is asked for a different exit.</div>
+      <div class="tg"><span class="lab">Start on boot</span>
+        <button class="mini" id="t-boot" role="switch" aria-checked="false" aria-label="start on boot"></button></div>
+      <p>Go anonymous automatically every time this machine boots.</p>
+    </div>
+    <div class="card">
+      <div class="tg"><span class="lab">Bridges</span>
+        <button class="mini" id="t-bridges" role="switch" aria-checked="false" aria-label="bridges"></button></div>
+      <p>Turn on only if Tor itself is blocked on your network. Slower, so leave it off otherwise.</p>
+    </div>
+    <div class="card">
+      <h3>Change IP every</h3>
       <div class="row">
         <input id="ivin" placeholder="2m" maxlength="6" aria-label="rotation interval">
-        <button data-act="interval" data-from="ivin">Set</button>
+        <button data-act="interval" data-from="ivin">Save</button>
       </div>
+      <p>How often Tor is asked for a different exit. Now: <b id="iv">—</b></p>
     </div>
     <div class="card">
-      <h3>Exit country</h3>
-      <div class="val"><span id="ec">any</span></div>
-      <div class="sub">Strict — Tor will not leave from anywhere else.</div>
+      <h3>Leave Tor from</h3>
       <div class="row">
-        <input id="ecin" placeholder="de" maxlength="3" aria-label="exit country code">
+        <input id="ecin" placeholder="de" maxlength="3" aria-label="exit country">
         <button data-act="exit" data-from="ecin">Set</button>
-        <button data-act="exit" data-arg="off">Clear</button>
+        <button data-act="exit" data-arg="off">Any</button>
       </div>
+      <p>Two-letter country code. Now: <b id="ec">any</b></p>
+    </div>
+  </section>
+
+  <!-- one-shot actions -->
+  <section class="grid">
+    <div class="card">
+      <h3>Do it once</h3>
+      <div class="row">
+        <button data-act="ip">New IP</button>
+        <button data-act="mac">New MAC</button>
+        <button data-act="leaktest">Leak test</button>
+      </div>
+      <p>New IP gives you a different exit. New MAC re-randomizes your hardware address.</p>
     </div>
     <div class="card">
-      <h3>Start on boot</h3>
-      <div class="val"><span id="bootv">—</span></div>
-      <div class="sub">Go anonymous automatically at every boot.</div>
+      <h3>If something breaks</h3>
       <div class="row">
-        <button data-act="enable">Enable</button>
-        <button data-act="disable">Disable</button>
+        <button data-act="doctor">Diagnose</button>
+        <button data-act="repair">Repair</button>
+        <button class="danger" data-act="panic">Panic</button>
       </div>
+      <p>Panic cuts every connection and puts you back on your real identity immediately.</p>
     </div>
   </section>
 
   <section class="console">
-    <div class="top"><i></i>output</div>
+    <div class="bh"><i></i>output</div>
     <pre id="out"></pre>
   </section>
 
-  <p class="note">
-    Bound to <b>127.0.0.1</b> only, token-gated, and it closes itself after an hour idle.<br>
-    anonx hides your <b>IP, DNS and MAC</b> — it cannot hide who you log in as. For browsing, use <b>Tor Browser</b>.
+  <p class="foot">
+    This panel is on <b>127.0.0.1</b> only, needs the token in your URL, and closes itself after an hour idle.<br>
+    anonx hides your <b>IP, DNS and MAC</b>. It cannot hide who you log in as — for browsing, use <b>Tor Browser</b>.
   </p>
 </div>
-
 <div class="toast" id="toast"></div>
 
 <script>
-const TOKEN = "__TOKEN__";
-const $ = s => document.querySelector(s);
-const out = $("#out"), toast = $("#toast");
-let busy = false, timer = null;
+const TOKEN="__TOKEN__", $=s=>document.querySelector(s);
+const out=$("#out"), toast=$("#toast");
+let busy=false, last=null;
 
-const api = (path, opts={}) => fetch(path, {
-  ...opts, headers:{ "X-Anonx-Token":TOKEN, "Content-Type":"application/json", ...(opts.headers||{}) }
-});
+const api=(p,o={})=>fetch(p,{...o,headers:{"X-Anonx-Token":TOKEN,"Content-Type":"application/json",...(o.headers||{})}});
 
-function say(msg, kind){
-  toast.textContent = msg;
-  toast.className = "toast show " + (kind||"");
-  clearTimeout(say._t); say._t = setTimeout(()=>toast.className="toast",2600);
+function say(m,k){toast.textContent=m;toast.className="toast show "+(k||"");
+  clearTimeout(say._t);say._t=setTimeout(()=>toast.className="toast",2600);}
+function log(t,x,ok){
+  const b=document.createElement("b"); b.textContent=`\n[${new Date().toLocaleTimeString()}] ${t}\n`;
+  const s=document.createElement("span"); s.className=ok===false?"er":ok===true?"ok":"";
+  s.textContent=(x||"").trim()+"\n";
+  out.append(b,s); out.scrollTop=out.scrollHeight;
 }
-function log(title, text, ok){
-  const stamp = new Date().toLocaleTimeString();
-  const b = document.createElement("b"); b.textContent = `\n[${stamp}] ${title}\n`;
-  const s = document.createElement("span"); s.className = ok===false?"er":ok===true?"ok":"";
-  s.textContent = (text||"").trim() + "\n";
-  out.append(b, s); out.scrollTop = out.scrollHeight;
-}
+const fmt=s=>{const n=+s||180;return n<60?n+"s":n<3600?(n/60).toFixed(n%60?1:0)+"m":(n/3600).toFixed(n%3600?1:0)+"h";};
 
-// ── 3D tilt: one rAF, transform only, disabled for reduced-motion ──
-const flat = matchMedia("(prefers-reduced-motion:reduce)").matches;
-function tilt(card){
-  if (flat) return;
-  card.addEventListener("pointermove", e=>{
-    const r = card.getBoundingClientRect();
-    const px = (e.clientX-r.left)/r.width, py = (e.clientY-r.top)/r.height;
-    card.style.setProperty("--mx", (px*100)+"%");
-    card.style.setProperty("--my", (py*100)+"%");
-    card.style.transform =
-      `perspective(900px) rotateX(${(.5-py)*7}deg) rotateY(${(px-.5)*9}deg) translateZ(6px)`;
-  });
-  card.addEventListener("pointerleave", ()=>{ card.style.transform=""; });
-}
-
-// ── render ──
-function statCards(s){
-  const yes = (t,sub)=>({dot:"g",val:t,sub});
-  const no  = (t,sub)=>({dot:"r",val:t,sub});
-  const mac = s.ifaces.map(i =>
-    i.spoofed ? {h:`MAC · ${i.dev}`, ...yes(i.mac, `real ${i.perm} — hidden from the local network`)}
-              : {h:`MAC · ${i.dev}`, ...no(i.mac||"?", i.perm?`real hardware address`:`cannot read the real one`)});
-  return [
-    {h:"Tor service", ...(s.tor && s.trans ? yes("running","transparent ports 9040/5353 open")
-        : s.tor ? {dot:"y",val:"starting",sub:"ports not up yet"} : no("stopped","nothing is being routed"))},
-    {h:"Kill switch", ...(s.locked ? yes("locked","anything not going through Tor is dropped")
-        : no("off","apps connect directly"))},
-    {h:"DNS", ...(s.resolv==="127.0.0.1" && s.dns_ok ? yes("inside Tor","your ISP cannot see your lookups")
-        : s.resolv==="127.0.0.1" ? {dot:"y",val:"pinned, not answering",sub:"try Repair"}
-        : no(s.resolv||"?","your router sees every site"))},
-    {h:"IPv6", ...(s.ipv6_blocked ? yes("blocked","Tor is IPv4-only, so v6 would expose you")
-        : s.locked ? no("open while locked","run Repair") : no("open","reachable over v6 as yourself"))},
-    {h:"Browser", ...(s.hardened ? yes("hardened",`uniform fingerprint, WebRTC off (${s.hardened} profile)`)
-        : s.locked ? no("not hardened","canvas and fonts still fingerprint you")
-        : {dot:"y",val:"—",sub:"applied when you go anonymous"})},
-    {h:"Rotation", ...(s.rotating ? yes("automatic", s.last_rotation||"running")
-        : no("off","exit IP will not change on its own"))},
-    ...mac,
-  ];
+/* Every row states the reading, then what it means for you. The meaning is the
+   point — "REJECT rule present" tells a stranger nothing. */
+function rows(s){
+  const r=[];
+  r.push(s.anonymous
+    ? {l:"g",k:"Your IP",v:"hidden",m:"Sites see a Tor exit node's address, not yours."}
+    : {l:"r",k:"Your IP",v:"visible",m:"Every site you open sees your real address."});
+  r.push(s.locked
+    ? {l:"g",k:"Kill switch",v:"armed",m:"If Tor stops, traffic stops too — it cannot fall back to the open internet."}
+    : {l:"r",k:"Kill switch",v:"off",m:"Apps are connecting straight out, with nothing in the way."});
+  r.push(s.tor&&s.trans ? {l:"g",k:"Tor",v:"carrying traffic",m:"Connected, and the transparent ports are open."}
+    : s.tor ? {l:"y",k:"Tor",v:"still starting",m:"Running, but no circuits yet. Give it a moment."}
+    : {l:"r",k:"Tor",v:"stopped",m:"Nothing is being routed through Tor at all."});
+  r.push(s.resolv==="127.0.0.1"&&s.dns_ok
+    ? {l:"g",k:"DNS",v:"inside Tor",m:"Your ISP cannot see which sites you look up."}
+    : s.resolv==="127.0.0.1"
+    ? {l:"y",k:"DNS",v:"pinned, no answer",m:"Pointed at Tor but nothing is replying. Try Repair."}
+    : {l:"r",k:"DNS",v:s.resolv||"unknown",m:"Your router or ISP sees the name of every site you visit."});
+  r.push(s.ipv6_blocked ? {l:"g",k:"IPv6",v:"blocked",m:"Tor is IPv4-only, so any IPv6 route would expose you. Closed."}
+    : {l:"r",k:"IPv6",v:"open",m:"Sites reachable over IPv6 can still see you as yourself."});
+  r.push(s.hardened ? {l:"g",k:"Browser",v:"hardened",m:`Firefox reports a uniform fingerprint and WebRTC is off (${s.hardened} profile).`}
+    : s.locked ? {l:"r",k:"Browser",v:"not hardened",m:"Canvas, fonts and WebGL can still fingerprint you."}
+    : {l:"y",k:"Browser",v:"—",m:"Applied when you go anonymous."});
+  r.push(s.rotating ? {l:"g",k:"IP changes",v:"every "+fmt(s.interval),m:s.last_rotation||"Rotating on schedule."}
+    : {l:"r",k:"IP changes",v:"off",m:"Your exit IP will stay the same until you change it."});
+  s.ifaces.forEach(i=>r.push(i.spoofed
+    ? {l:"g",k:"MAC "+i.dev,v:i.mac,m:`Fake. Your real one (${i.perm}) is hidden from this network.`}
+    : {l:"r",k:"MAC "+i.dev,v:i.mac||"?",m:"This is your real hardware address, visible to the local network."}));
+  return r;
 }
 
 function render(s){
-  document.body.classList.toggle("on", s.anonymous);
-  document.body.classList.toggle("off", !s.anonymous);
-  $("#chip").textContent = s.anonymous ? "anonymous" : (s.locked ? "locked but broken" : "off");
-  $("#headline").textContent = s.anonymous ? "You are behind Tor."
-    : s.locked ? "Locked, but traffic is not reaching Tor." : "You are on your real identity.";
-  $("#subline").textContent = s.anonymous
-    ? "Every TCP connection and DNS query on this machine leaves through a Tor circuit."
-    : s.locked ? "The firewall is holding but Tor is not carrying traffic — nothing is leaking, nothing works either."
-    : "Nothing is hidden. Your real IP, DNS and hardware address are visible.";
+  last=s;
+  const on=s.anonymous;
+  document.body.classList.toggle("on",on);
+  document.body.classList.toggle("off",!on);
+  $("#ver").textContent="v"+(s.version||"?");
+  $("#master").setAttribute("aria-checked",String(on));
+  $("#state").textContent = on?"ANONYMOUS":(s.locked?"NOT WORKING":"OFF");
+  $("#exp").textContent = on
+    ? "Every connection and every DNS lookup on this machine is leaving through Tor."
+    : s.locked
+    ? "The firewall is holding, but Tor is not carrying traffic. Nothing is leaking — nothing works either. Try Repair."
+    : "Nothing is hidden. Your real IP, DNS and hardware address are all visible.";
+  $("#iv").textContent=fmt(s.interval);
+  $("#ec").textContent=s.exit_country?s.exit_country.toUpperCase():"any";
+  $("#t-boot").setAttribute("aria-checked",String(!!s.boot));
+  $("#t-bridges").setAttribute("aria-checked",String(!!s.bridges));
+  $("#upd").textContent=new Date().toLocaleTimeString();
 
-  $("#ipbox").textContent = s.resolv ? (s.anonymous ? "DNS → Tor (127.0.0.1:5353)" : "DNS → "+s.resolv) : "—";
-  $("#iphint").textContent = s.exit_country ? "exit country pinned to "+s.exit_country.toUpperCase() : "";
-  $("#iv").textContent = fmt(s.interval);
-  $("#ec").textContent = s.exit_country ? s.exit_country.toUpperCase() : "any";
-  $("#bootv").textContent = "—";
-  $("#b-start").disabled = s.anonymous || busy;
-  $("#b-stop").disabled  = (!s.locked && !s.tor) || busy;
-
-  const grid = $("#grid");
-  const cards = statCards(s);
-  if (grid.children.length !== cards.length){
-    grid.innerHTML = cards.map(()=>`<div class="card"><h3></h3><div class="val"><span class="dot"></span><span></span></div><div class="sub"></div></div>`).join("");
-    [...grid.children].forEach(tilt);
+  const data=rows(s), box=$("#rows");
+  if(box.children.length!==data.length){
+    box.innerHTML=data.map(()=>`<div class="r"><span class="led"></span><span class="k"></span><span><span class="v"></span><span class="m"></span></span></div>`).join("");
   }
-  cards.forEach((c,i)=>{
-    const el = grid.children[i];
-    el.querySelector("h3").textContent = c.h;
-    el.querySelector(".dot").className = "dot "+c.dot;
-    el.querySelector(".val span:last-child").textContent = c.val;
-    el.querySelector(".sub").textContent = c.sub;
+  data.forEach((d,i)=>{
+    const el=box.children[i];
+    el.className="r "+d.l;
+    el.querySelector(".led").className="led "+d.l;
+    el.querySelector(".k").textContent=d.k;
+    el.querySelector(".v").textContent=d.v;
+    el.querySelector(".m").textContent=d.m;
   });
 }
-const fmt = sec => { const n=+sec||180; return n<60?n+"s":n<3600?(n/60).toFixed(n%60?1:0)+"m":(n/3600).toFixed(n%3600?1:0)+"h"; };
 
 async function poll(){
   try{
-    const r = await api("/api/status");
-    if(!r.ok) throw new Error("status "+r.status);
+    const r=await api("/api/status"); if(!r.ok) throw 0;
     render(await r.json());
-    $("#livetxt").textContent = "live"; $("#pulse").style.background = "var(--on)";
-  }catch(e){
-    $("#livetxt").textContent = "panel offline"; $("#pulse").style.background = "var(--off)";
-  }
+    $("#livetxt").textContent="LIVE"; $("#pulse").style.background="var(--on)";
+  }catch(e){ $("#livetxt").textContent="OFFLINE"; $("#pulse").style.background="var(--off)"; }
 }
 
-async function act(name, arg, label){
+async function act(name,arg,label){
   if(busy) return;
-  busy = true; document.body.classList.add("busy");
+  busy=true; document.body.classList.add("busy");
   document.querySelectorAll("button").forEach(b=>b.disabled=true);
   say(label+"…");
   try{
-    const r = await api("/api/do",{method:"POST",body:JSON.stringify({action:name,arg:arg||""})});
-    const j = await r.json();
-    if(!r.ok){ log(label, j.error||"refused", false); say(j.error||"refused","bad"); }
-    else { log(label, j.out, j.ok); say(j.ok?label+" done":label+" failed", j.ok?"good":"bad"); }
-  }catch(e){ log(label, String(e), false); say("panel lost the server","bad"); }
+    const r=await api("/api/do",{method:"POST",body:JSON.stringify({action:name,arg:arg||""})});
+    const j=await r.json();
+    if(!r.ok){ log(label,j.error||"refused",false); say(j.error||"refused","bad"); }
+    else{ log(label,j.out,j.ok); say(j.ok?label+" done":label+" failed",j.ok?"good":"bad"); }
+  }catch(e){ log(label,String(e),false); say("lost the server","bad"); }
   finally{
-    busy = false; document.body.classList.remove("busy");
+    busy=false; document.body.classList.remove("busy");
     document.querySelectorAll("button").forEach(b=>b.disabled=false);
     poll();
   }
 }
 
-document.addEventListener("click", e=>{
-  const b = e.target.closest("button[data-act]"); if(!b) return;
-  const name = b.dataset.act;
-  let arg = b.dataset.arg || "";
+$("#master").addEventListener("click",()=>{
+  if(!last) return;
+  last.anonymous||last.locked ? act("stop","","Going back to real")
+                              : act("start","","Going anonymous");
+});
+$("#t-boot").addEventListener("click",e=>{
+  const on=e.currentTarget.getAttribute("aria-checked")==="true";
+  act(on?"disable":"enable","",on?"Boot autostart off":"Boot autostart on");
+});
+$("#t-bridges").addEventListener("click",e=>{
+  const on=e.currentTarget.getAttribute("aria-checked")==="true";
+  act("bridges",on?"off":"on",on?"Bridges off":"Bridges on");
+});
+document.addEventListener("click",e=>{
+  const b=e.target.closest("button[data-act]"); if(!b) return;
+  let arg=b.dataset.arg||"";
   if(b.dataset.from){
-    arg = ($("#"+b.dataset.from).value||"").trim();
+    arg=($("#"+b.dataset.from).value||"").trim();
     if(!arg){ say("type a value first","bad"); return; }
   }
-  if(name==="panic" && !confirm("Panic cuts every connection and puts you back on your real identity. Continue?")) return;
-  act(name, arg, b.textContent.trim());
+  if(b.dataset.act==="panic" && !confirm("Panic cuts every connection and puts you back on your real identity. Continue?")) return;
+  act(b.dataset.act,arg,b.textContent.trim());
 });
-document.addEventListener("keydown", e=>{
+document.addEventListener("keydown",e=>{
   if(e.target.tagName==="INPUT") return;
-  if(e.key==="s") $("#b-start").click();
-  if(e.key==="x") $("#b-stop").click();
+  if(e.key==="s"||e.key==="S") !last?.anonymous && act("start","","Going anonymous");
+  if(e.key==="x"||e.key==="X") (last?.anonymous||last?.locked) && act("stop","","Going back to real");
 });
 
-[...document.querySelectorAll(".grid .card")].forEach(tilt);
-poll(); timer = setInterval(poll, 4000);
+poll(); setInterval(poll,4000);
 </script>
 </body>
 </html>

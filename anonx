@@ -33,6 +33,8 @@ MIN_INTERVAL=10                    # Tor rate-limits NEWNYM; below this it is a 
 FORCE_UTC=1                        # 1 = set the timezone to UTC while anonymous (a big fingerprint vector), restore on stop
 KEEP_MAC_VENDOR=0                  # 1 = keep the real vendor prefix (OUI) when randomizing the MAC
 HARDEN_BROWSER=1                   # 1 = switch Firefox's own anti-fingerprinting on while anonymous, undo on stop
+AUTO_UI=1                          # 1 = bring the control panel up with 'start' and print its link; 'stop' closes it again
+CHECK_UPDATE=1                     # 1 = say on 'start' when a newer anonx exists (checked through Tor; never installed for you)
 # override any of these in /etc/anonx.conf
 [ -r /etc/anonx.conf ] && . /etc/anonx.conf 2>/dev/null
 
@@ -755,6 +757,9 @@ start(){
   need_root start
   [ -z "$TOR_UID" ] && { echo "${R}tor user '$TOR_USER' not found — is tor installed?${N}"; exit 1; }
   mkdir -p "$STATE"
+  # root-only: the panel's session token lives here, and mkdir's default 755
+  # would let any local user read it and drive the panel.
+  chmod 700 "$STATE" 2>/dev/null
   ANONX_ARMED=1
 
   title "start" "going anonymous"
@@ -927,6 +932,14 @@ start(){
   start_rotator
   ok "IP rotation every ${Y}$(human_dur "$INTERVAL")${N} started (pid $(cat "$STATE/rotator.pid"))"
 
+  # 7) the panel, and a word about newer versions. Both are last on purpose:
+  #    neither may delay or fail the part that actually hides you.
+  if ui_start_bg; then
+    ok "control panel up ${D}·${N} ${G}$(ui_url)${N}"
+    info "  every manual control, live state ${D}· closes with ${G}sudo anonx stop${N}"
+  fi
+  update_check
+
   ANONX_ARMED=0
   line
   sleep 2
@@ -1019,6 +1032,9 @@ tor_stop(){
 # here once. Pass "quiet" to run it without printing a line per step.
 deanonymize(){
   local say=1; [ "$1" = quiet ] && say=0
+  # the panel goes first: it can start Tor back up, so it must not be alive
+  # while we are tearing the anonymous session down
+  if ui_alive; then ui_stop_bg; [ $say = 1 ] && ok "control panel closed"; else ui_stop_bg; fi
   stop_rotator;      [ $say = 1 ] && ok "rotation stopped"
   unlock_dns;        [ $say = 1 ] && ok "resolv.conf unlocked"
   restore_firewall;  [ $say = 1 ] && ok "firewall restored (IPv4 + IPv6 open)"
@@ -1183,6 +1199,7 @@ status(){
 
   box_sep
   if [ "$locked" -eq 1 ]; then
+    ui_alive && [ -n "$(ui_url)" ] && box_row "${D}control panel:${N}  ${G}$(ui_url)${N}"
     box_row "${D}go back to normal:${N}  ${G}sudo anonx stop${N}"
   else
     box_row "${D}go anonymous:${N}  ${G}sudo anonx start${N}  ${D}or${N} ${G}anonx start 30s${N}"
@@ -1494,17 +1511,61 @@ run_cmd(){
 # check a token in constant time, and a shell HTTP server is a liability in a
 # tool whose whole job is not leaking.
 #
-# It stays a foreground process on purpose: the panel is a session you open and
-# close, not a daemon. A control surface that can switch your anonymity off has
-# no business surviving in the background after you have walked away.
+# Started with `start` it runs in the background and is killed by stop/panic/
+# repair, so the panel's life is exactly the length of the anonymous session —
+# a control surface that can switch your anonymity off must not outlive it.
+# Called on its own (`anonx ui`) it runs in the foreground, where Ctrl-C ends it.
+ui_path(){
+  local u
+  for u in /usr/local/share/anonx/anonx-ui "$(dirname "$(readlink -f "$0")")/anonx-ui"; do
+    [ -x "$u" ] && { printf '%s' "$u"; return 0; }
+  done
+  return 1
+}
+ui_alive(){ [ -f "$STATE/ui.pid" ] && kill -0 "$(cat "$STATE/ui.pid" 2>/dev/null)" 2>/dev/null; }
+ui_url(){ cat "$STATE/ui.url" 2>/dev/null; }
+
+# Bring the panel up detached and capture the URL it prints. The URL carries the
+# session token, so its two files are written under a 077 umask — $STATE is
+# root-only, but a world-readable token file would hand the panel to any local
+# user, which is the whole threat this thing is built against.
+ui_start_bg(){
+  [ "$AUTO_UI" = 1 ] || return 1
+  command -v python3 >/dev/null 2>&1 || return 1
+  local ui i url; ui=$(ui_path) || return 1
+  ui_alive && return 0
+  ( umask 077
+    ANONX_BIN="$(readlink -f "$0")" ANONX_UI_NO_OPEN=1 \
+      setsid python3 "$ui" > "$STATE/ui.log" 2>&1 < /dev/null &
+    echo $! > "$STATE/ui.pid" )
+  for i in $(seq 1 20); do
+    url=$(grep -om1 'http://127\.0\.0\.1:[0-9]*/?t=[A-Za-z0-9_-]*' "$STATE/ui.log" 2>/dev/null)
+    [ -n "$url" ] && { (umask 077; printf '%s\n' "$url" > "$STATE/ui.url"); return 0; }
+    ui_alive || return 1
+    sleep 0.25
+  done
+  return 1
+}
+
+ui_stop_bg(){
+  [ -f "$STATE/ui.pid" ] || return 0
+  kill "$(cat "$STATE/ui.pid" 2>/dev/null)" 2>/dev/null
+  rm -f "$STATE/ui.pid" "$STATE/ui.url" "$STATE/ui.log"
+}
+
 ui_cmd(){
   need_root ui
   local ui
-  for ui in /usr/local/share/anonx/anonx-ui "$(dirname "$(readlink -f "$0")")/anonx-ui"; do
-    [ -x "$ui" ] && break
-    ui=""
-  done
-  [ -z "$ui" ] && {
+  # already running from `start`? hand back that session instead of racing a
+  # second server against it — two panels means two live tokens.
+  if ui_alive && [ -n "$(ui_url)" ]; then
+    title "ui" "the local control panel"
+    ok   "panel:         ${G}already running${N} ${D}· started with anonx start${N}"
+    info "open:          ${G}$(ui_url)${N}"
+    info "closes with:   ${G}sudo anonx stop${N}"
+    endblock; return 0
+  fi
+  ui=$(ui_path) || {
     title "ui" "the local control panel"
     bad "panel:         ${R}not installed${N}"
     info "reinstall:     ${G}sudo ./install.sh${N} ${D}· needs python3${N}"
@@ -1517,6 +1578,27 @@ ui_cmd(){
     endblock; return 1
   }
   ANONX_BIN="$(readlink -f "$0")" exec python3 "$ui"
+}
+
+# ---- update check on start ----
+#
+# Only ever tells you; it never installs anything behind your back — a tool that
+# can silently replace the binary holding your firewall open is not one you can
+# reason about. Runs AFTER the lock on purpose, so the request rides Tor: asking
+# GitHub for the latest anonx from your real address tells your ISP both that
+# you run it and when you started.
+update_check(){
+  [ "$CHECK_UPDATE" = 1 ] || return 0
+  from_apt && return 0
+  local remote
+  remote=$(timeout 20 curl -fsSL "$UPDATE_URL" 2>/dev/null \
+           | grep -m1 '^VERSION=' | cut -d'"' -f2)
+  case "$remote" in ''|*[!0-9.]*) return 0 ;; esac
+  [ "$remote" = "$VERSION" ] && return 0
+  # only speak up when the remote is actually newer; sort -V keeps 1.10 > 1.9
+  [ "$(printf '%s\n%s\n' "$VERSION" "$remote" | sort -V | tail -1)" = "$remote" ] || return 0
+  warn "update:        ${Y}v$remote is out${N} ${D}· you are on v$VERSION${N}"
+  info "get it:        ${G}sudo anonx update${N}"
 }
 
 ip_rotate(){
