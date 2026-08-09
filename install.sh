@@ -211,6 +211,19 @@ ok "installed /usr/local/bin/anonx"
 # would say "command not found". /usr/sbin is always on that path.
 ln -sf /usr/local/bin/anonx /usr/sbin/anonx
 ok "symlinked /usr/sbin/anonx (so 'sudo anonx' always resolves)"
+
+# The control panel is optional: it needs python3, and anonx itself does not.
+# Missing python3 costs you `anonx ui` and nothing else, so this never dies.
+if [ -f "$SRC/anonx-ui" ] && [ -f "$SRC/anonx-ui.html" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    install -d -m 755 /usr/local/share/anonx
+    install -m 755 "$SRC/anonx-ui"      /usr/local/share/anonx/anonx-ui
+    install -m 644 "$SRC/anonx-ui.html" /usr/local/share/anonx/anonx-ui.html
+    ok "installed the control panel  ${D}· open it with${N} ${G}sudo anonx ui${N}"
+  else
+    warn "python3 missing — skipping the control panel (${W}anonx ui${N}); everything else works"
+  fi
+fi
 echo
 
 # ================= 5) smoke test: does Tor really come up here? =================

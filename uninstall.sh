@@ -44,7 +44,7 @@ ok "anonx binary and symlinks removed"
 # 4) data, config, state, and any shell helper
 rm -rf /var/lib/anonx            # state: prev copy, interval, rotate.log, backups
 rm -f  /etc/anonx.conf           # user config
-rm -rf /usr/local/share/anonx /usr/share/anonx   # shell helper (old installs)
+rm -rf /usr/local/share/anonx /usr/share/anonx   # control panel + shell helper (old installs)
 rm -f  /tmp/anonx.* 2>/dev/null
 ok "state, config and helper files removed"
 

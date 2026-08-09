@@ -20,7 +20,7 @@
 #     sudo anonx repair      # force-restore a half-broken state
 #     sudo anonx enable      # start on boot   (disable removes it)
 #
-#  anonx 1.1 — MIT
+#  anonx 1.3 — MIT
 #
 set -o pipefail
 
@@ -42,7 +42,7 @@ case "$INTERVAL" in ''|*[!0-9]*) INTERVAL=180 ;; esac
 NON_TOR="127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16"
 # ----------------------------------------
 
-VERSION="1.2"
+VERSION="1.3"
 AUTHOR="sidh4ck3r"
 
 # colors
@@ -95,6 +95,7 @@ canon(){
     bridges|bridge|snowflake|censored)         echo bridges ;;
     leaktest|leak|leaks|test|audit|scan)       echo leaktest ;;
     run|exec|through|via|wrap)                 echo run ;;
+    ui|gui|panel|web|dashboard|dash)           echo ui ;;
     panic|kill|abort|emergency|sos)            echo panic ;;
     update|upgrade|self-update)                echo update ;;
     changelog|changes|history|whats-new)       echo changelog ;;
@@ -1486,6 +1487,38 @@ run_cmd(){
   exec "$@"
 }
 
+# ---- ui: the local control panel ----
+#
+# Everything anonx does by hand, behind buttons. The server is a separate
+# python file rather than more bash because this one needs to speak HTTP and
+# check a token in constant time, and a shell HTTP server is a liability in a
+# tool whose whole job is not leaking.
+#
+# It stays a foreground process on purpose: the panel is a session you open and
+# close, not a daemon. A control surface that can switch your anonymity off has
+# no business surviving in the background after you have walked away.
+ui_cmd(){
+  need_root ui
+  local ui
+  for ui in /usr/local/share/anonx/anonx-ui "$(dirname "$(readlink -f "$0")")/anonx-ui"; do
+    [ -x "$ui" ] && break
+    ui=""
+  done
+  [ -z "$ui" ] && {
+    title "ui" "the local control panel"
+    bad "panel:         ${R}not installed${N}"
+    info "reinstall:     ${G}sudo ./install.sh${N} ${D}· needs python3${N}"
+    endblock; return 1
+  }
+  command -v python3 >/dev/null 2>&1 || {
+    title "ui" "the local control panel"
+    bad "python3:       ${R}not installed${N}"
+    info "install it:    ${G}sudo apt install python3${N}"
+    endblock; return 1
+  }
+  ANONX_BIN="$(readlink -f "$0")" exec python3 "$ui"
+}
+
 ip_rotate(){
   need_root ip
   local before after rc
@@ -1536,6 +1569,10 @@ mac_rotate(){
 # and show you exactly what changed. Add a line here whenever you change anonx.
 changelog_data(){
 cat <<'EOF'
+#CL# 1.3 2026-08-09 New: `anonx ui` — a control panel for every manual control, bound to 127.0.0.1, token-gated, closes itself when idle
+#CL# 1.3 2026-08-09 New: browser fingerprint hardening — Firefox resistFingerprinting + WebRTC off while anonymous, undone on stop
+#CL# 1.3 2026-08-09 Fixed a real leak: forwarded traffic (docker, VMs, hotspot clients) bypassed the lock entirely — IPv4 FORWARD is dropped now, like IPv6
+#CL# 1.3 2026-08-09 Fixed: `stop` wiped your firewall instead of restoring it — the saved iptables dump was written but never read back
 #CL# 1.2 2026-08-07 New: `anonx run <cmd>` — push one tool (python script, pip, curl) through Tor on its own circuit
 #CL# 1.2 2026-08-07 Commands are flexible now: aliases (on/off, newip, leak, fix, check) and any unambiguous prefix
 #CL# 1.2 2026-08-07 status is drawn in one aligned box now, with the version and author in the top edge
@@ -1723,6 +1760,7 @@ usage(){
   printf "    ${G}anonx run${N} ${D}<command>${N}       run one tool through Tor on its own circuit\n"
   printf "                              ${D}e.g.${N} ${G}anonx run python3 scan.py${N}\n"
   printf "    ${G}sudo anonx bridges${N} ${D}on|off${N}   reach Tor where it's blocked (Snowflake)\n"
+  printf "    ${G}sudo anonx ui${N}               open the control panel in your browser (127.0.0.1 only)\n"
   printf "    ${G}sudo anonx panic${N}            cut all traffic and drop back to your real identity NOW\n\n"
 
   printf "  ${W}WHEN SOMETHING FEELS WRONG${N}\n"
@@ -1798,6 +1836,7 @@ case "$CMD" in
   bridges)   bridges_cmd "$2" ;;
   leaktest)  leaktest ;;
   run)       shift; run_cmd "$@" ;;
+  ui)        ui_cmd ;;
   panic)     panic ;;
   update)    update "$2" ;;
   changelog) changelog ;;

@@ -132,6 +132,7 @@ changed on this system"*.
 | `sudo anonx leaktest` | Score your setup for DNS / IPv6 / kill-switch / app leaks |
 | `anonx run` `<command>` | Run one tool through Tor on its own circuit — `anonx run python3 scan.py` |
 | `sudo anonx bridges` `on\|off` | Reach Tor where it's blocked (Snowflake) |
+| `sudo anonx ui` | Open the control panel in your browser (`127.0.0.1` only) |
 | `sudo anonx panic` | Cut all traffic and drop to your real identity **now** |
 | `sudo anonx doctor` | Layer-by-layer diagnosis of what broke |
 | `sudo anonx repair` | Force everything back to a working network |
@@ -145,6 +146,32 @@ plus any unambiguous prefix.
 
 Time format: `30s` seconds · `5m` minutes · `1h` hours (minimum `10s`, because
 Tor rate-limits new circuits below that).
+
+<br>
+
+## 🎛️ Control panel
+
+```bash
+sudo anonx ui
+```
+
+Every manual control behind buttons — start/stop, new IP, new MAC, rotation
+interval, exit country, leak test, panic — with the live state of Tor, the kill
+switch, DNS, IPv6, the browser hardening and each NIC's MAC, refreshed every
+four seconds.
+
+A panel that can run `anonx stop` is a de-anonymization tool if anyone else can
+reach it, so four locks all have to hold on every request:
+
+| Lock | Stops |
+|---|---|
+| Per-launch token, `hmac.compare_digest` | Anything that did not get the URL anonx printed |
+| `Host` must be the loopback address and port | DNS rebinding (`evil.com` → `127.0.0.1`) |
+| `Origin` must match exactly, on every POST | Cross-site requests from a page you have open |
+| Actions are fixed `argv`, arguments regex-checked | Command injection — nothing from the request reaches a shell |
+
+Bound to `127.0.0.1` only, runs in the foreground, and exits by itself after an
+hour idle. Needs `python3`; without it you lose `anonx ui` and nothing else.
 
 <br>
 

@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+"""
+anonx-ui — the local control panel for anonx.
+
+Why this file is paranoid about a "just localhost" server
+--------------------------------------------------------
+This panel can run `anonx stop`. On an anonymity tool that makes it a
+de-anonymization weapon, not a convenience: any page you have open in any
+browser can issue requests to 127.0.0.1, and anonx's own firewall accepts
+loopback by design, so the port is reachable exactly when it matters most.
+An unauthenticated panel would let a hostile page switch your anonymity off
+and then watch your real address connect.
+
+So, four locks, all of which must hold:
+
+  token   a 32-byte URL-safe secret, minted per launch, never written to
+          disk. It travels in the X-Anonx-Token header for actions, so it
+          stays out of Referer and out of shell history. Compared with
+          hmac.compare_digest.
+  Host    must be the loopback address and port we bound. This is what stops
+          DNS rebinding: attacker.com resolving to 127.0.0.1 still sends
+          "Host: attacker.com".
+  Origin  on POST, must be exactly our own origin. A cross-site form post
+          cannot forge it.
+  action  the request names an action; the name is looked up in a dict of
+          fixed argv lists. Nothing from the request is ever interpolated
+          into a command, so there is no shell to inject into.
+
+Bound to 127.0.0.1 only, single-threaded, and it exits on its own after
+IDLE_EXIT seconds of silence so a forgotten tab is not a permanent hole.
+"""
+
+import hmac
+import http.server
+import json
+import os
+import re
+import secrets
+import socket
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+ANONX = os.environ.get("ANONX_BIN") or ("/usr/local/bin/anonx" if Path("/usr/local/bin/anonx").exists() else str(HERE / "anonx"))
+STATE = Path("/var/lib/anonx")
+IDLE_EXIT = 3600          # seconds of no requests before the server gives up
+CMD_TIMEOUT = 180         # a start() with a slow bootstrap is allowed to take its time
+
+TOKEN = secrets.token_urlsafe(32)
+_last_seen = time.time()
+
+# The whole command surface, as fixed argv. A request picks a key; it never
+# supplies a word of the command. `interval` and `exit` take one argument,
+# validated by the regex before it is appended.
+ACTIONS = {
+    "start":    (["start"], None),
+    "stop":     (["stop"], None),
+    "restart":  (["restart"], None),
+    "ip":       (["ip"], None),
+    "mac":      (["mac"], None),
+    "repair":   (["repair"], None),
+    "panic":    (["panic"], None),
+    "leaktest": (["leaktest"], None),
+    "doctor":   (["doctor"], None),
+    "enable":   (["enable"], None),
+    "disable":  (["disable"], None),
+    "interval": (["interval"], re.compile(r"^[0-9]{1,5}[smh]?$")),
+    "exit":     (["exit"], re.compile(r"^([a-zA-Z]{2}|off)$")),
+    "bridges":  (["bridges"], re.compile(r"^(on|off)$")),
+}
+
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def run_anonx(argv, timeout=CMD_TIMEOUT):
+    try:
+        p = subprocess.run([ANONX] + argv, capture_output=True, text=True,
+                           timeout=timeout, env={**os.environ, "TERM": "dumb"})
+        return {"ok": p.returncode == 0, "code": p.returncode,
+                "out": ANSI.sub("", (p.stdout or "") + (p.stderr or "")).strip()}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "code": -1, "out": f"timed out after {timeout}s"}
+    except FileNotFoundError:
+        return {"ok": False, "code": -1, "out": f"anonx not found at {ANONX}"}
+
+
+def sh(cmd, timeout=8):
+    """One short read-only probe. Never takes anything from the request."""
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return p.stdout.strip()
+    except Exception:
+        return ""
+
+
+def snapshot():
+    """
+    Everything the dashboard renders, in one poll. Deliberately built from
+    cheap local probes — no network call in the common path, so the panel
+    stays responsive while Tor is busy. The exit IP is the one exception and
+    it is cached by the rotator's own log when we have it.
+    """
+    locked = subprocess.run(["iptables", "-C", "OUTPUT", "-j", "REJECT"],
+                            capture_output=True).returncode == 0
+    tor_up = subprocess.run(["systemctl", "is-active", "--quiet", "tor@default"],
+                            capture_output=True).returncode == 0
+    ports = sh(["ss", "-tln"])
+    trans = "127.0.0.1:9040" in ports
+    dnsport = "127.0.0.1:5353" in sh(["ss", "-uln"])
+
+    resolv = ""
+    try:
+        for line in Path("/etc/resolv.conf").read_text().splitlines():
+            if line.startswith("nameserver"):
+                resolv = line.split()[1]
+                break
+    except Exception:
+        pass
+
+    v6 = subprocess.run(["ip6tables", "-C", "OUTPUT", "-o", "lo", "-j", "ACCEPT"],
+                        capture_output=True).returncode == 0
+
+    ifaces = []
+    for line in sh(["ip", "-br", "link"]).splitlines():
+        f = line.split()
+        if len(f) >= 3 and f[0] != "lo" and f[1] == "UP":
+            perm = sh(["ethtool", "-P", f[0]]).split()[-1:] or [""]
+            ifaces.append({"dev": f[0], "mac": f[2], "perm": perm[0],
+                           "spoofed": bool(perm[0]) and perm[0] != f[2]
+                                      and re.match(r"^([0-9a-f]{2}:){5}", perm[0], re.I) is not None})
+
+    rot_pid = (STATE / "rotator.pid")
+    rotating = False
+    if rot_pid.exists():
+        try:
+            os.kill(int(rot_pid.read_text().strip()), 0)
+            rotating = True
+        except Exception:
+            rotating = False
+
+    def read(p, d=""):
+        try:
+            return (STATE / p).read_text().strip()
+        except Exception:
+            return d
+
+    last = ""
+    log = STATE / "rotate.log"
+    if log.exists():
+        try:
+            lines = [l for l in log.read_text().splitlines() if l.strip()]
+            last = lines[-1] if lines else ""
+        except Exception:
+            pass
+
+    return {
+        "locked": locked, "tor": tor_up, "trans": trans, "dns_ok": dnsport,
+        "resolv": resolv, "ipv6_blocked": v6 and locked,
+        "ifaces": ifaces, "rotating": rotating,
+        "interval": read("interval", "180"), "exit_country": read("exit"),
+        "hardened": read("hardened"), "last_rotation": last,
+        "anonymous": locked and tor_up and trans,
+    }
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    server_version = "anonx-ui"
+    sys_version = ""
+
+    def log_message(self, *a):
+        pass  # the panel is not a web log
+
+    # ---- the four locks ----
+    def _origin_ok(self):
+        host = self.headers.get("Host", "")
+        if host != f"127.0.0.1:{self.server.server_port}":
+            return False
+        origin = self.headers.get("Origin")
+        if self.command == "POST":
+            if origin != f"http://127.0.0.1:{self.server.server_port}":
+                return False
+        elif origin is not None and origin != f"http://127.0.0.1:{self.server.server_port}":
+            return False
+        return True
+
+    def _token_ok(self):
+        sent = self.headers.get("X-Anonx-Token", "")
+        return hmac.compare_digest(sent, TOKEN)
+
+    def _send(self, code, body, ctype="application/json"):
+        raw = body if isinstance(body, bytes) else body.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        # the page is fully self-contained; nothing may be fetched or framed
+        self.send_header("Content-Security-Policy",
+                         "default-src 'none'; style-src 'unsafe-inline'; "
+                         "script-src 'unsafe-inline'; connect-src 'self'; "
+                         "img-src data:; frame-ancestors 'none'; base-uri 'none'")
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def do_GET(self):
+        global _last_seen
+        _last_seen = time.time()
+        if not self._origin_ok():
+            return self._send(403, json.dumps({"error": "bad host or origin"}))
+
+        path = self.path.split("?")[0]
+        if path == "/":
+            # The page itself is gated by the token in the query string: that is
+            # the only place a browser can carry it on a top-level navigation.
+            q = self.path.split("?", 1)[1] if "?" in self.path else ""
+            tok = ""
+            for part in q.split("&"):
+                if part.startswith("t="):
+                    tok = part[2:]
+            if not hmac.compare_digest(tok, TOKEN):
+                return self._send(403, "<h1>403 — open the link anonx printed</h1>", "text/html")
+            html = (HERE / "anonx-ui.html").read_text()
+            return self._send(200, html.replace("__TOKEN__", TOKEN), "text/html; charset=utf-8")
+
+        if path == "/api/status":
+            if not self._token_ok():
+                return self._send(403, json.dumps({"error": "bad token"}))
+            return self._send(200, json.dumps(snapshot()))
+
+        return self._send(404, json.dumps({"error": "no"}))
+
+    def do_POST(self):
+        global _last_seen
+        _last_seen = time.time()
+        if not self._origin_ok():
+            return self._send(403, json.dumps({"error": "bad host or origin"}))
+        if not self._token_ok():
+            return self._send(403, json.dumps({"error": "bad token"}))
+        if self.path.split("?")[0] != "/api/do":
+            return self._send(404, json.dumps({"error": "no"}))
+
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(n) or b"{}")
+        except Exception:
+            return self._send(400, json.dumps({"error": "bad json"}))
+
+        name = body.get("action", "")
+        if name not in ACTIONS:
+            return self._send(400, json.dumps({"error": "unknown action"}))
+        argv, pattern = ACTIONS[name]
+        argv = list(argv)
+        if pattern is not None:
+            arg = str(body.get("arg", ""))
+            if not pattern.match(arg):
+                return self._send(400, json.dumps({"error": "bad argument"}))
+            argv.append(arg)
+
+        return self._send(200, json.dumps(run_anonx(argv)))
+
+
+def idle_watch(httpd):
+    while True:
+        time.sleep(30)
+        if time.time() - _last_seen > IDLE_EXIT:
+            httpd.shutdown()
+            return
+
+
+def main():
+    if os.geteuid() != 0:
+        print("anonx-ui needs root (it drives iptables through anonx): sudo anonx ui")
+        return 1
+
+    port = int(os.environ.get("ANONX_UI_PORT", "0"))
+    httpd = http.server.HTTPServer(("127.0.0.1", port), Handler)
+    port = httpd.server_port
+    url = f"http://127.0.0.1:{port}/?t={TOKEN}"
+
+    print(f"\n  \033[1;37manonx control panel\033[0m")
+    print(f"  \033[2m────────────────────────────────────────────────────────\033[0m")
+    print(f"  \033[36m•\033[0m open:  \033[32m{url}\033[0m")
+    print(f"  \033[36m•\033[0m bound to 127.0.0.1 only · token required · quits after "
+          f"{IDLE_EXIT // 60} min idle")
+    # flushed explicitly: piped through tee or a log, the URL would otherwise
+    # sit in the buffer and you would never see the token you need.
+    print(f"  \033[36m•\033[0m stop it with Ctrl-C\n", flush=True)
+
+    # Hand the URL to the invoking human's browser, as them — never as root.
+    user = os.environ.get("SUDO_USER")
+    if user and user != "root":
+        try:
+            subprocess.Popen(["runuser", "-u", user, "--", "xdg-open", url],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+    threading.Thread(target=idle_watch, args=(httpd,), daemon=True).start()
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()
+        print("  panel closed\n")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except OSError as e:
+        print(f"anonx-ui: {e}")
+        sys.exit(1)
