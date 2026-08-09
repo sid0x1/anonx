@@ -539,6 +539,15 @@ apply_firewall(){
   iptables -A INPUT -i lo -j ACCEPT
   iptables -A INPUT -p udp --sport 67 --dport 68 -j ACCEPT
 
+  # ---- IPv4 forward: docker containers, VMs, phones on your hotspot ----
+  # Their packets are ROUTED, not generated here, so they never enter OUTPUT and
+  # every rule above misses them: a container kept talking straight to the
+  # internet while status happily said ANONYMOUS. Tor's TransPort only takes
+  # locally-generated traffic, so there is nothing to redirect them into —
+  # forwarding is simply off while the lock is on, exactly like IPv6.
+  iptables -F FORWARD
+  iptables -P FORWARD DROP
+
   # ---- IPv6: kill it entirely (Tor transparent proxy is IPv4-only) ----
   ip6tables -F
   ip6tables -P INPUT  DROP
@@ -550,16 +559,32 @@ apply_firewall(){
 
 firewall_locked(){ iptables -C OUTPUT -j REJECT 2>/dev/null; }
 
+# Put back the ruleset that was here BEFORE anonx locked anything.
+#
+# This used to be a blind flush to open-everything, which is not a restore: it
+# deleted whatever firewall was already on the box. A ufw setup, docker's
+# FORWARD/DOCKER chains, a hand-written ruleset — all silently gone after one
+# `anonx stop`, and the dump start() had carefully saved was never read back.
+# Now the dump is the primary path; the flush stays only as the fallback for a
+# box that has no dump yet (locked by an older build, or the state dir wiped).
 restore_firewall(){
-  iptables -F
-  iptables -t nat -F OUTPUT
-  iptables -P INPUT ACCEPT
-  iptables -P OUTPUT ACCEPT
-  iptables -P FORWARD ACCEPT
-  ip6tables -F
-  ip6tables -P INPUT ACCEPT
-  ip6tables -P OUTPUT ACCEPT
-  ip6tables -P FORWARD ACCEPT
+  if [ -s "$STATE/iptables.bak" ] && iptables-restore < "$STATE/iptables.bak" 2>/dev/null; then
+    :
+  else
+    iptables -F
+    iptables -F FORWARD
+    iptables -t nat -F OUTPUT
+    iptables -P INPUT ACCEPT
+    iptables -P OUTPUT ACCEPT
+    iptables -P FORWARD ACCEPT
+  fi
+  if ! { [ -s "$STATE/ip6tables.bak" ] && ip6tables-restore < "$STATE/ip6tables.bak" 2>/dev/null; }; then
+    ip6tables -F
+    ip6tables -P INPUT ACCEPT
+    ip6tables -P OUTPUT ACCEPT
+    ip6tables -P FORWARD ACCEPT
+  fi
+  return 0
 }
 
 # ---------------- helpers ----------------
@@ -640,9 +665,15 @@ start(){
 
   title "start" "going anonymous"
 
-  # save original firewall + MAC + DNS once
-  [ -f "$STATE/iptables.bak" ]  || iptables-save  > "$STATE/iptables.bak"  2>/dev/null
-  [ -f "$STATE/ip6tables.bak" ] || ip6tables-save > "$STATE/ip6tables.bak" 2>/dev/null
+  # Snapshot the firewall we are about to replace, so stop/panic/repair can put
+  # it back exactly (restore_firewall reads these). Re-taken on every start:
+  # "save it once, ever" meant a ruleset you added months later got restored
+  # over with a stale dump. The guard is the lock itself — re-running start while
+  # already locked must not save anonx's own rules as the "original".
+  if ! firewall_locked; then
+    iptables-save  > "$STATE/iptables.bak"  2>/dev/null
+    ip6tables-save > "$STATE/ip6tables.bak" 2>/dev/null
+  fi
   perm_mac > "$STATE/orig_mac" 2>/dev/null
   unlock_dns
   [ -f "$STATE/resolv.conf.bak" ] || cp -f /etc/resolv.conf "$STATE/resolv.conf.bak" 2>/dev/null
