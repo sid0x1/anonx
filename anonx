@@ -32,6 +32,7 @@ STATE=/var/lib/anonx
 MIN_INTERVAL=10                    # Tor rate-limits NEWNYM; below this it is a no-op
 FORCE_UTC=1                        # 1 = set the timezone to UTC while anonymous (a big fingerprint vector), restore on stop
 KEEP_MAC_VENDOR=0                  # 1 = keep the real vendor prefix (OUI) when randomizing the MAC
+HARDEN_BROWSER=1                   # 1 = switch Firefox's own anti-fingerprinting on while anonymous, undo on stop
 # override any of these in /etc/anonx.conf
 [ -r /etc/anonx.conf ] && . /etc/anonx.conf 2>/dev/null
 
@@ -302,6 +303,98 @@ tz_restore(){
   command -v timedatectl >/dev/null 2>&1 && \
     timedatectl set-timezone "$(cat "$STATE/timezone.bak")" 2>/dev/null
   rm -f "$STATE/timezone.bak"
+}
+
+# ---- browser fingerprint hardening ----
+#
+# Everything that fingerprints you happens INSIDE the browser: canvas readback,
+# WebGL renderer strings, the font list, screen and window dimensions,
+# AudioContext. None of it crosses the network as anything but encrypted TLS, so
+# a transparent proxy cannot see it, let alone rewrite it. The only lever from
+# out here is the browser's own switch.
+#
+# privacy.resistFingerprinting is Firefox's port of the Tor Browser defences,
+# and it is the OPPOSITE of a random user-agent: every RFP user reports the same
+# UA, the same platform, letterboxed window sizes, a standard font list and UTC.
+# You disappear into that group. A rotating UA does the reverse — it contradicts
+# the properties JavaScript can still measure, and the rotation is itself a
+# signal. That is why anonx pins instead of randomizes.
+#
+# WebRTC is the other half, and it is squarely anonx's problem rather than a
+# fingerprint: it opens its own paths and hands out local interface addresses.
+#
+# This is a floor, NOT a replacement for Tor Browser. Your everyday profile
+# still carries its cookies, logins and history, and those identify you no
+# matter how uniform the fingerprint looks.
+HARDEN_BEGIN="// --- anonx fingerprint hardening ---"
+HARDEN_END="// --- end anonx ---"
+
+# The invoking human's home, not root's. anonx runs under sudo, so $HOME is
+# /root and every Firefox profile would be missed.
+user_home(){
+  local u h
+  u="${SUDO_USER:-}"
+  [ -z "$u" ] && u=$(logname 2>/dev/null)
+  if [ -n "$u" ] && [ "$u" != root ]; then
+    h=$(getent passwd "$u" 2>/dev/null | cut -d: -f6)
+    [ -n "$h" ] && { printf '%s' "$h"; return 0; }
+  fi
+  printf '%s' "$HOME"
+}
+
+# Every Firefox-family profile (firefox, librewolf, snap and flatpak layouts)
+ff_profiles(){
+  local h d
+  h=$(user_home)
+  for d in "$h"/.mozilla/firefox/*/ "$h"/.librewolf/*/ \
+           "$h"/snap/firefox/common/.mozilla/firefox/*/ \
+           "$h"/.var/app/org.mozilla.firefox/.mozilla/firefox/*/; do
+    [ -d "$d" ] && [ -f "${d}prefs.js" ] && printf '%s\n' "${d%/}"
+  done
+}
+
+# user.js is re-read at every startup and overrides prefs.js, so a marked block
+# there is both authoritative and trivially removable — prefs.js is never edited.
+harden_browser(){
+  [ "$HARDEN_BROWSER" = 1 ] || return 1
+  local p n=0 uj owner
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    uj="$p/user.js"
+    n=$((n+1))
+    [ -f "$uj" ] && grep -q "anonx fingerprint hardening" "$uj" 2>/dev/null && continue
+    cat >> "$uj" <<EOF
+$HARDEN_BEGIN
+user_pref("privacy.resistFingerprinting", true);
+user_pref("privacy.resistFingerprinting.letterboxing", true);
+user_pref("privacy.firstparty.isolate", true);
+user_pref("privacy.trackingprotection.enabled", true);
+user_pref("media.peerconnection.enabled", false);
+user_pref("network.dns.disablePrefetch", true);
+user_pref("network.prefetch-next", false);
+user_pref("network.predictor.enabled", false);
+user_pref("geo.enabled", false);
+$HARDEN_END
+EOF
+    # keep it owned by the human, or Firefox cannot rewrite the profile later
+    owner=$(stat -c '%U:%G' "$p" 2>/dev/null) && chown "$owner" "$uj" 2>/dev/null
+  done <<< "$(ff_profiles)"
+  [ "$n" -gt 0 ] && { echo "$n" > "$STATE/hardened"; return 0; }
+  return 1
+}
+
+unharden_browser(){
+  [ -f "$STATE/hardened" ] || return 0
+  local p uj
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    uj="$p/user.js"
+    [ -f "$uj" ] || continue
+    sed -i "\%^$HARDEN_BEGIN\$%,\%^$HARDEN_END\$%d" "$uj" 2>/dev/null
+    # an empty user.js is just noise; Firefox is fine without one
+    [ -s "$uj" ] || rm -f "$uj"
+  done <<< "$(ff_profiles)"
+  rm -f "$STATE/hardened"
 }
 
 # ---- stream isolation on the SOCKS port only ----
@@ -819,6 +912,15 @@ start(){
     [ -s "$STATE/timezone.bak" ] && ok "timezone set to UTC (was $(cat "$STATE/timezone.bak")) — restored on stop"
   fi
 
+  # 5d) browser fingerprint. The network layer is sealed by now, but a browser
+  #     identifies you without ever revealing an IP — so flip Firefox's own
+  #     anti-fingerprinting on, and say plainly what it does and does not cover.
+  if harden_browser; then
+    ok "browser hardened in $(cat "$STATE/hardened") Firefox profile(s) — uniform fingerprint, WebRTC off"
+    warn "restart Firefox for it to take effect ${D}· undone by ${G}anonx stop${N}"
+    info "  cookies and logins still identify you — for real browsing anonymity use ${G}Tor Browser${N}"
+  fi
+
   # 6) rotation daemon — fresh log, so `status` never shows a stale "last change"
   : > "$STATE/rotate.log" 2>/dev/null
   start_rotator
@@ -921,6 +1023,7 @@ deanonymize(){
   restore_firewall;  [ $say = 1 ] && ok "firewall restored (IPv4 + IPv6 open)"
   restore_dns;       [ $say = 1 ] && ok "DNS handed back to NetworkManager"
   [ -s "$STATE/timezone.bak" ] && { tz_restore; [ $say = 1 ] && ok "timezone restored"; }
+  [ -f "$STATE/hardened" ] && { unharden_browser; [ $say = 1 ] && ok "browser prefs restored (restart Firefox)"; }
   restore_mac;       [ $say = 1 ] && ok "MAC restored → $(cur_mac)"
   if tor_active; then
     tor_stop && { [ $say = 1 ] && ok "Tor service stopped"; } || \
@@ -1053,6 +1156,17 @@ status(){
     row "$NO"  "DNS"      "${R}pointed at Tor, but Tor is not listening${N} ${D}· sudo anonx repair${N}"
   else
     row "$NO"  "DNS"      "${R}${dns:-?}${N} ${D}· your router/ISP sees every site you visit${N}"
+  fi
+
+  # ---- browser fingerprint ----
+  # Deliberately never a green tick on its own: hardening only levels the
+  # fingerprint, and a logged-in profile is identified regardless. The honest
+  # answer for browsing is Tor Browser, so the row keeps saying so.
+  if [ -f "$STATE/hardened" ]; then
+    row "$YES" "Browser"  "${G}hardened${N} ${D}· uniform fingerprint, WebRTC off ($(cat "$STATE/hardened") profile(s))${N}"
+    subrow "${D}cookies and logins still identify you ·${N} ${G}Tor Browser${N} ${D}for real browsing anonymity${N}"
+  elif [ "$locked" -eq 1 ]; then
+    row "$NO"  "Browser"  "${R}not hardened${N} ${D}· canvas, fonts and WebGL still fingerprint you${N}"
   fi
 
   # ---- rotation ----
