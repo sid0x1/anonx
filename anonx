@@ -24,6 +24,27 @@
 #
 set -o pipefail
 
+# ---------------- footing ----------------
+# Resolve our own path, then stand somewhere that exists — both before anything
+# spawns a child.
+#
+# Start anonx from a directory that has since been deleted (or one root cannot
+# traverse) and the working directory it inherits has no name the kernel can
+# give back. Every child then opens with
+#     shell-init: error retrieving current directory: getcwd: cannot access
+#     parent directories: No such file or directory
+# in front of anonx's own output — sudo, `bash -n` in the update check, the
+# runuser that opens the panel, all of them. Nothing is broken; it is just that
+# a root tool has no business inheriting a directory it cannot resolve.
+#
+# $0 is resolved FIRST because it is often relative ("./anonx"), and a relative
+# path stops meaning anything the moment we move.
+ANONX_SELF=$(readlink -f "$0" 2>/dev/null); [ -n "$ANONX_SELF" ] || ANONX_SELF=$0
+# kept so `run` can hand your own directory back — `anonx run python3 scan.py`
+# has to find a script named relative to where you typed it, not to /
+ANONX_PWD=$PWD
+cd / 2>/dev/null || cd /tmp 2>/dev/null || :
+
 # ---------------- config ----------------
 INTERVAL=180                       # default seconds between IP rotations (3 min)
 ROTATE_MAC_EACH_CYCLE=0            # 1 = also change MAC every cycle (disrupts wifi)
@@ -129,7 +150,7 @@ case "$CMD" in help|version|changelog|run) ANONX_NOSUDO=1 ;; esac
 
 if [ "$(id -u)" -ne 0 ] && [ -z "$ANONX_NOSUDO" ]; then
   if command -v sudo >/dev/null 2>&1; then
-    ANONX_SELF=$(readlink -f "$0" 2>/dev/null)
+    :
     [ -x "$ANONX_SELF" ] || ANONX_SELF=$(command -v anonx 2>/dev/null)
     exec sudo ANONX_NOSUDO=1 "${ANONX_SELF:-/usr/local/bin/anonx}" "$@"
   fi
@@ -1465,6 +1486,11 @@ leaktest(){
 # your browsing), and a tool you want anonymous without locking down the whole
 # machine. Needs no root, so it runs as you, not as root.
 run_cmd(){
+  # back to where you typed it. anonx moves to / at startup so no child
+  # inherits a directory the kernel cannot name, but YOUR tool's arguments are
+  # relative to YOUR directory — `anonx run python3 scan.py` has to find the
+  # script you meant.
+  [ -d "$ANONX_PWD" ] && cd "$ANONX_PWD" 2>/dev/null
   [ $# -eq 0 ] && {
     title "run" "push one command through Tor, on its own circuit"
     bad "nothing to run"
@@ -1518,7 +1544,7 @@ run_cmd(){
 # Called on its own (`anonx ui`) it runs in the foreground, where Ctrl-C ends it.
 ui_path(){
   local u
-  for u in /usr/local/share/anonx/anonx-ui "$(dirname "$(readlink -f "$0")")/anonx-ui"; do
+  for u in /usr/local/share/anonx/anonx-ui "$(dirname "$ANONX_SELF")/anonx-ui"; do
     [ -x "$u" ] && { printf '%s' "$u"; return 0; }
   done
   return 1
@@ -1536,7 +1562,7 @@ ui_start_bg(){
   local ui i url; ui=$(ui_path) || return 1
   ui_alive && return 0
   ( umask 077
-    ANONX_BIN="$(readlink -f "$0")" ANONX_UI_NO_OPEN=1 \
+    ANONX_BIN="$ANONX_SELF" ANONX_UI_NO_OPEN=1 \
       setsid python3 "$ui" > "$STATE/ui.log" 2>&1 < /dev/null &
     echo $! > "$STATE/ui.pid" )
   for i in $(seq 1 20); do
@@ -1578,7 +1604,7 @@ ui_cmd(){
     info "install it:    ${G}sudo apt install python3${N}"
     endblock; return 1
   }
-  ANONX_BIN="$(readlink -f "$0")" exec python3 "$ui"
+  ANONX_BIN="$ANONX_SELF" exec python3 "$ui"
 }
 
 # ---- update check on start ----
@@ -1632,7 +1658,7 @@ update_check(){
   [ "$CHECK_UPDATE" = 1 ] || return 0
   from_apt && return 0
   local tmp remote self
-  self=$(readlink -f "$0")
+  self="$ANONX_SELF"
   tmp=$(mktemp /tmp/anonx.XXXXXX) || return 0
   timeout 45 curl -fsSL "$UPDATE_URL" -o "$tmp" 2>/dev/null || { rm -f "$tmp"; return 0; }
   remote=$(update_fetch_ok "$tmp") || { rm -f "$tmp"; return 0; }
@@ -1760,12 +1786,12 @@ UPDATE_URL="${ANONX_UPDATE_URL:-https://raw.githubusercontent.com/sid0x1/anonx/m
 [ -r /etc/anonx.conf ] && . /etc/anonx.conf 2>/dev/null
 
 # was this copy installed by apt/dpkg?
-from_apt(){ dpkg -S "$(readlink -f "$0")" >/dev/null 2>&1; }
+from_apt(){ dpkg -S "$ANONX_SELF" >/dev/null 2>&1; }
 
 update(){
   need_root update
   local self remote_ver tmp
-  self=$(readlink -f "$0")
+  self="$ANONX_SELF"
 
   # installed as a package -> let apt do it, mixing the two would be a mess
   if from_apt; then
@@ -1951,6 +1977,16 @@ usage(){
 if [ "$(id -u)" -eq 0 ] && resolv_stuck && [ "$CMD" != "start" ] && [ "$CMD" != "repair" ] && [ "$CMD" != "stop" ]; then
   warn "leftover anonx DNS lock detected (resolv.conf → 127.0.0.1, Tor DNSPort down)"
   info "fix it with:  ${G}sudo anonx repair${N}"
+fi
+
+# If the directory you launched from has been deleted, bash printed its
+# "shell-init: ... getcwd" complaint before this script got control — nothing in
+# here can suppress that, it happens while the interpreter is still starting.
+# What we CAN do is stop it looking like anonx broke, and say how to end it.
+# (We already moved to / at startup, so no child of ours repeats it.)
+if [ -n "$ANONX_PWD" ] && [ ! -d "$ANONX_PWD" ]; then
+  warn "the directory you ran this from no longer exists"
+  info "  that ${W}shell-init: getcwd${N} line above is your shell, not anonx ${D}· ${G}cd ~${N} ${D}ends it${N}"
 fi
 
 # `anonx start 45s` / `anonx start --interval 2m` — one-off or new saved default
