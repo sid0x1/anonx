@@ -239,10 +239,9 @@ you with a working network.
 - `ping 8.8.8.8` fails while locked — ICMP can't ride Tor. That's the design; websites still work.
 - UDP (except DNS) is dropped: video calls, WireGuard and most games won't work while locked.
 - Tor hides your **IP, not your habits** — logging into your own accounts still identifies you. For browsing, use the Tor Browser.
-- **Fingerprint hardening is a floor, not a ceiling.** anonx flips Firefox's own `resistFingerprinting` and kills WebRTC, which levels the obvious signals. It cannot go further: canvas, WebGL and font probing all happen *inside* the browser and never cross the network as anything but encrypted TLS, so a transparent proxy has nothing to inspect or rewrite. Only **Tor Browser** gets you the full defence.
-- anonx deliberately **does not randomize your user-agent**. A rotating UA makes you *more* identifiable, not less: it contradicts the properties JavaScript can still measure, and the rotation itself is a signal. Uniformity is what hides you, which is exactly what `resistFingerprinting` provides.
+- Fingerprint hardening only covers Firefox. Canvas, WebGL and font probing happen inside the browser, so a transparent proxy can't reach them — **Tor Browser** is still the full defence.
 - MAC randomization only hides you from the local network segment.
-- Forwarded traffic (containers, VMs, hotspot clients) is **dropped**, not routed through Tor — Tor's `TransPort` only accepts locally-generated packets. Your own machine keeps working; the guests lose the network while locked.
+- Forwarded traffic (containers, VMs, hotspot clients) is **dropped**, not routed through Tor — Tor's `TransPort` only takes locally-generated packets. Your own machine keeps working; the guests lose the network while locked.
 - Tested on Kali (NetworkManager + `tor@default`); other Debian derivatives should work.
 
 <br>
