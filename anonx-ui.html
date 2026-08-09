@@ -5,218 +5,312 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>anonx · control panel</title>
-<style>
-/* ─────────────────────────────────────────────────────────────
+<style>/* ─────────────────────────────────────────────────────────────
    anonx control panel
 
-   Two rules the whole page follows:
+   Two rules the page follows:
      1. green = you are hidden.  red = you are not.  nothing else.
-     2. every reading says what it MEANS in plain words, right under
-        the value. A panel that needs a manual is a panel that gets
-        misread, and misreading this one means thinking you are
-        anonymous when you are not.
+     2. every reading gives the value, then what it MEANS, on its own
+        line. A panel that gets misread is worse than no panel, because
+        misreading this one means believing you are anonymous.
+
+   Layout note: every stacked text element is display:block. They were
+   inline spans with margin-top once, which inline boxes ignore — the
+   value and its explanation collided on a single line.
    ───────────────────────────────────────────────────────────── */
 :root{
-  --bg:#06070c; --panel:#0c0e17;
-  --card:rgba(255,255,255,.04); --card-hi:rgba(255,255,255,.07);
-  --stroke:rgba(255,255,255,.10); --stroke-hi:rgba(255,255,255,.2);
-  --txt:#e9ebf3; --dim:#8d92a8; --dimmer:#585d73;
-  --on:#22e08a; --on-d:#0a7d4a; --on-g:rgba(34,224,138,.5);
-  --off:#ff4d6a; --off-d:#9e1830; --off-g:rgba(255,77,106,.45);
+  /* surfaces, cool and layered rather than flat black */
+  --bg:#04050a; --bg2:#070912;
+  --s1:#0b0d16; --s2:#101320; --s3:#161a2b;
+  --line:#1b1f30; --line2:#272c42;
+  --txt:#f1f3fa; --dim:#989eb6; --dimmer:#666d87;
+  --on:#2ae692; --on-d:#0a8551; --on-g:rgba(42,230,146,.5);
+  --off:#ff5872; --off-d:#a3172f; --off-g:rgba(255,88,114,.45);
   --acc:#8b5cf6; --acc2:#22d3ee; --warn:#fbbf24;
   --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
-  --ease:cubic-bezier(.22,.9,.28,1);
+  --e:cubic-bezier(.22,.9,.28,1);
+  --eb:cubic-bezier(.34,1.42,.5,1);
+  /* one shadow scale, used everywhere: contact + key + ambient */
+  --sh1:0 1px 2px rgba(0,0,0,.5),0 4px 10px -4px rgba(0,0,0,.6);
+  --sh2:0 2px 4px rgba(0,0,0,.4),0 12px 26px -12px rgba(0,0,0,.8);
+  --sh3:0 4px 8px rgba(0,0,0,.4),0 28px 56px -24px rgba(0,0,0,.92);
+  --hair:inset 0 1px 0 rgba(255,255,255,.055);
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{
-  font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Inter,Roboto,system-ui,sans-serif;
+  font:15px/1.62 ui-sans-serif,-apple-system,"Segoe UI",Inter,Roboto,system-ui,sans-serif;
   color:var(--txt);background:var(--bg);min-height:100vh;overflow-x:hidden;
-  -webkit-font-smoothing:antialiased;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
 }
+/* ambient light — shifts green when you are hidden, red when you are not */
 body::before{
-  content:"";position:fixed;inset:-30%;z-index:-2;pointer-events:none;
+  content:"";position:fixed;inset:-30%;z-index:-3;pointer-events:none;
   background:
-    radial-gradient(36rem 36rem at 15% 18%,rgba(139,92,246,.17),transparent 62%),
-    radial-gradient(32rem 32rem at 85% 15%,rgba(34,211,238,.13),transparent 60%),
-    radial-gradient(40rem 40rem at 50% 95%,var(--amb,rgba(255,77,106,.13)),transparent 62%);
-  filter:blur(30px);animation:drift 28s var(--ease) infinite alternate;
-  transition:background 1s var(--ease);
+    radial-gradient(32rem 32rem at 10% 10%,rgba(139,92,246,.16),transparent 60%),
+    radial-gradient(28rem 28rem at 90% 8%,rgba(34,211,238,.11),transparent 58%),
+    radial-gradient(36rem 36rem at 50% 98%,var(--amb,rgba(255,88,114,.12)),transparent 62%);
+  filter:blur(36px);animation:drift 32s var(--e) infinite alternate;
+  transition:background 1.1s var(--e);
 }
-body.on{--amb:rgba(34,224,138,.15)}
-@keyframes drift{50%{transform:translate3d(2%,-2%,0) scale(1.05)}100%{transform:translate3d(-2%,2%,0)}}
-.wrap{max-width:960px;margin:0 auto;padding:34px 20px 64px}
+body.on{--amb:rgba(42,230,146,.14)}
+/* film grain — keeps the large flat panels from banding */
+body::after{
+  content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;opacity:.032;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+@keyframes drift{50%{transform:translate3d(2%,-2%,0) scale(1.04)}100%{transform:translate3d(-2%,2%,0)}}
+.wrap{max-width:1000px;margin:0 auto;padding:44px 24px 76px}
 
-/* ── header ── */
-header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:26px;flex-wrap:wrap}
-.brand{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+/* shared: hairline gradient edge on a rounded box */
+.edge{position:relative}
+.edge::before{
+  content:"";position:absolute;inset:0;border-radius:inherit;padding:1px;pointer-events:none;
+  background:linear-gradient(150deg,rgba(255,255,255,.16),rgba(255,255,255,.03) 34%,transparent 62%,rgba(255,255,255,.07));
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;mask-composite:exclude;
+}
+
+/* ── header ─────────────────────────────────────────── */
+header{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:34px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:15px;flex-wrap:wrap}
 .brand h1{
-  font:800 26px/1 var(--mono);letter-spacing:-.02em;
-  background:linear-gradient(100deg,#fff,var(--acc) 50%,var(--acc2));
+  font:800 29px/1 var(--mono);letter-spacing:-.045em;
+  background:linear-gradient(100deg,#fff 8%,var(--acc) 48%,var(--acc2) 88%);
   -webkit-background-clip:text;background-clip:text;color:transparent;
-  background-size:200% auto;animation:sheen 8s linear infinite;
+  background-size:220% auto;animation:sheen 9s linear infinite;
+  filter:drop-shadow(0 2px 14px rgba(139,92,246,.32));
 }
-@keyframes sheen{to{background-position:200% center}}
-.brand .v{font:600 11px/1 var(--mono);color:var(--dimmer);padding:4px 8px;border:1px solid var(--stroke);border-radius:6px}
-.brand .by{font-size:12px;color:var(--dimmer)}
-.brand .by b{color:var(--dim);font-weight:600}
-.live{display:flex;align-items:center;gap:8px;font:600 11px/1 var(--mono);color:var(--dim);
-  padding:8px 13px;border:1px solid var(--stroke);border-radius:99px;background:var(--card);letter-spacing:.1em}
-.live i{width:7px;height:7px;border-radius:99px;background:var(--dim);animation:blip 2s ease-in-out infinite}
-@keyframes blip{50%{opacity:.25}}
+@keyframes sheen{to{background-position:220% center}}
+.tag{
+  font:700 11px/1 var(--mono);color:var(--dim);letter-spacing:.05em;
+  padding:6px 11px;border-radius:8px;border:1px solid var(--line2);
+  background:linear-gradient(180deg,var(--s2),var(--s1));box-shadow:var(--hair);
+}
+.by{font-size:13px;color:var(--dimmer);letter-spacing:.01em}
+.by b{color:var(--dim);font-weight:600}
+.live{
+  display:flex;align-items:center;gap:10px;font:700 11px/1 var(--mono);color:var(--dim);
+  letter-spacing:.16em;padding:11px 17px;border-radius:99px;border:1px solid var(--line2);
+  background:linear-gradient(180deg,var(--s2),var(--s1));box-shadow:var(--hair),var(--sh1);
+}
+.live i{width:8px;height:8px;border-radius:99px;background:var(--dimmer);animation:blip 2s ease-in-out infinite;
+  box-shadow:0 0 10px 2px currentColor}
+@keyframes blip{50%{opacity:.28}}
 
-/* ── the one big switch ── */
+/* ── master switch ──────────────────────────────────── */
 .master{
-  display:flex;align-items:center;gap:26px;flex-wrap:wrap;
-  padding:26px 28px;border-radius:22px;margin-bottom:18px;
-  background:linear-gradient(160deg,var(--card-hi),rgba(255,255,255,.014));
-  border:1px solid var(--stroke);backdrop-filter:blur(20px);position:relative;overflow:hidden;
-  transition:box-shadow .6s var(--ease),border-color .6s var(--ease);
+  display:flex;align-items:center;gap:34px;flex-wrap:wrap;
+  padding:36px;border-radius:26px;margin-bottom:24px;
+  background:linear-gradient(158deg,var(--s3),var(--s1) 58%,var(--bg2));
+  border:1px solid var(--line2);box-shadow:var(--hair),var(--sh3);
+  transition:box-shadow .7s var(--e),border-color .7s var(--e);
 }
-body.on  .master{border-color:rgba(34,224,138,.34);box-shadow:0 24px 70px -40px var(--on-g)}
-body.off .master{border-color:rgba(255,77,106,.3); box-shadow:0 24px 70px -40px var(--off-g)}
+body.on  .master{border-color:rgba(42,230,146,.3); box-shadow:var(--hair),var(--sh3),0 0 90px -50px var(--on-g)}
+body.off .master{border-color:rgba(255,88,114,.26);box-shadow:var(--hair),var(--sh3),0 0 90px -50px var(--off-g)}
 
-/* a real switch: track, sliding knob, LED */
 .switch{
-  --w:112px;--h:56px;
-  width:var(--w);height:var(--h);flex:0 0 var(--w);border-radius:99px;cursor:pointer;
-  border:1px solid var(--stroke-hi);position:relative;padding:0;
-  background:linear-gradient(180deg,#05060a,#12141d);
-  box-shadow:inset 0 3px 10px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.05);
-  transition:box-shadow .45s var(--ease);
+  width:128px;height:64px;flex:0 0 128px;border-radius:99px;cursor:pointer;padding:0;position:relative;
+  border:1px solid var(--line2);
+  background:linear-gradient(180deg,#020306,#151929);
+  box-shadow:inset 0 5px 14px rgba(0,0,0,.95),inset 0 -1px 0 rgba(255,255,255,.05);
+  transition:box-shadow .5s var(--e),border-color .5s var(--e);
 }
+.switch::before{ /* track glow that fills in behind the knob */
+  content:"";position:absolute;inset:3px;border-radius:99px;opacity:0;
+  background:linear-gradient(90deg,var(--on-d),transparent 70%);
+  transition:opacity .5s var(--e);
+}
+body.on .switch::before{opacity:.55}
 .switch::after{ /* the knob */
-  content:"";position:absolute;top:4px;left:4px;width:46px;height:46px;border-radius:50%;
-  background:radial-gradient(circle at 36% 30%,#fff6,transparent 55%),var(--kc,#3a3f52);
-  box-shadow:0 4px 12px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.07),0 0 22px 3px var(--kg,transparent);
-  transition:transform .45s var(--ease),background .45s var(--ease),box-shadow .45s var(--ease);
+  content:"";position:absolute;top:5px;left:5px;width:52px;height:52px;border-radius:50%;z-index:1;
+  background:
+    radial-gradient(circle at 34% 26%,rgba(255,255,255,.55),transparent 52%),
+    radial-gradient(circle at 68% 82%,rgba(0,0,0,.32),transparent 55%),
+    var(--kc,#434860);
+  box-shadow:0 6px 16px rgba(0,0,0,.85),0 0 0 1px rgba(255,255,255,.1),0 0 30px 5px var(--kg,transparent);
+  transition:transform .5s var(--eb),background .5s var(--e),box-shadow .5s var(--e);
 }
-body.on .switch{--kc:var(--on);--kg:var(--on-g);box-shadow:inset 0 3px 10px rgba(0,0,0,.8),0 0 34px -6px var(--on-g)}
-body.on .switch::after{transform:translateX(54px)}
+body.on .switch{--kc:var(--on);--kg:var(--on-g);border-color:rgba(42,230,146,.34)}
+body.on .switch::after{transform:translateX(62px)}
 body.off .switch{--kc:var(--off);--kg:var(--off-g)}
-.switch:focus-visible{outline:2px solid var(--acc2);outline-offset:4px}
-.switch:disabled{opacity:.45;cursor:wait}
-body.busy .switch::after{animation:knobpulse .8s ease-in-out infinite}
-@keyframes knobpulse{50%{opacity:.55}}
+.switch:hover:not(:disabled)::after{box-shadow:0 6px 16px rgba(0,0,0,.85),0 0 0 1px rgba(255,255,255,.16),0 0 38px 7px var(--kg,transparent)}
+.switch:focus-visible{outline:2px solid var(--acc2);outline-offset:6px}
+.switch:disabled{opacity:.5;cursor:wait}
+body.busy .switch::after{animation:knob .85s ease-in-out infinite}
+@keyframes knob{50%{opacity:.5}}
 
-.master .txt{flex:1;min-width:230px}
-.master .state{font:800 30px/1.1 var(--mono);letter-spacing:-.02em;margin-bottom:6px}
-body.on  .master .state{color:var(--on)}
-body.off .master .state{color:var(--off)}
-.master .exp{color:var(--dim);font-size:14px;max-width:44ch}
-.master .hint{margin-top:9px;font-size:12.5px;color:var(--dimmer)}
-.master .hint kbd{font:600 11px/1 var(--mono);padding:3px 6px;border:1px solid var(--stroke);border-radius:5px;color:var(--dim)}
+.mtxt{flex:1;min-width:262px}
+.mtxt .state{
+  display:block;font:800 34px/1.12 var(--mono);letter-spacing:-.035em;margin-bottom:11px;
+  animation:rise .5s var(--e) both;
+}
+@keyframes rise{from{opacity:0;transform:translateY(7px)}}
+body.on  .mtxt .state{color:var(--on); text-shadow:0 0 34px var(--on-g)}
+body.off .mtxt .state{color:var(--off);text-shadow:0 0 34px var(--off-g)}
+.mtxt .exp{display:block;color:var(--dim);font-size:14.5px;line-height:1.68;max-width:50ch}
+.mtxt .hint{display:block;margin-top:16px;font-size:12.5px;color:var(--dimmer)}
+kbd{
+  font:700 11px/1 var(--mono);padding:4px 8px;border-radius:6px;color:var(--dim);
+  border:1px solid var(--line2);background:var(--bg);box-shadow:0 2px 0 var(--line);
+}
 
-/* ── digital board ── */
+/* ── status board ───────────────────────────────────── */
 .board{
-  border-radius:18px;border:1px solid var(--stroke);margin-bottom:18px;overflow:hidden;
-  background:linear-gradient(180deg,rgba(4,5,9,.85),rgba(8,10,17,.8));backdrop-filter:blur(16px);
-  position:relative;
+  border-radius:22px;border:1px solid var(--line);margin-bottom:24px;overflow:hidden;
+  background:linear-gradient(180deg,var(--s1),var(--bg2));box-shadow:var(--hair),var(--sh2);
 }
-.board::after{ /* scanlines — the "digital readout" texture */
-  content:"";position:absolute;inset:0;pointer-events:none;opacity:.4;
-  background:repeating-linear-gradient(180deg,rgba(255,255,255,.028) 0 1px,transparent 1px 3px);
+.bh{
+  display:flex;justify-content:space-between;align-items:center;gap:12px;
+  padding:16px 24px;border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,var(--s2),var(--s1));
+  font:700 11px/1 var(--mono);letter-spacing:.22em;color:var(--dimmer);text-transform:uppercase;
 }
-.board .bh{
-  display:flex;justify-content:space-between;align-items:center;gap:10px;
-  padding:12px 18px;border-bottom:1px solid var(--stroke);
-  font:700 10.5px/1 var(--mono);letter-spacing:.18em;color:var(--dimmer);text-transform:uppercase;
-}
-.rows{display:flex;flex-direction:column}
 .r{
-  display:grid;grid-template-columns:14px 122px minmax(0,1fr);gap:14px;align-items:start;
-  padding:13px 18px;border-bottom:1px solid rgba(255,255,255,.045);
-  transition:background .25s var(--ease);
+  display:grid;grid-template-columns:12px 152px minmax(0,1fr);gap:20px;align-items:start;
+  padding:18px 24px;border-bottom:1px solid var(--line);position:relative;
+  transition:background .28s var(--e);
 }
 .r:last-child{border-bottom:0}
-.r:hover{background:rgba(255,255,255,.028)}
-.led{width:10px;height:10px;border-radius:50%;margin-top:5px;background:var(--dimmer);
-  box-shadow:0 0 10px 2px transparent;transition:background .3s,box-shadow .3s}
-.led.g{background:var(--on); box-shadow:0 0 11px 2px var(--on-g); animation:led 2.6s ease-in-out infinite}
-.led.r{background:var(--off);box-shadow:0 0 11px 2px var(--off-g)}
-.led.y{background:var(--warn);box-shadow:0 0 11px 2px rgba(251,191,36,.45)}
-@keyframes led{50%{opacity:.55}}
-.r .k{font:600 11px/1.45 var(--mono);letter-spacing:.1em;color:var(--dimmer);text-transform:uppercase;padding-top:3px}
-.r .v{font:700 15px/1.35 var(--mono);letter-spacing:.01em;word-break:break-all}
-.r .m{font-size:12.5px;color:var(--dim);margin-top:3px;line-height:1.5}
-.r.g .v{color:var(--on)} .r.r .v{color:var(--off)} .r.y .v{color:var(--warn)}
-
-/* ── toggles + controls ── */
-.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));margin-bottom:18px}
-.card{
-  border-radius:16px;padding:17px 18px;border:1px solid var(--stroke);
-  background:linear-gradient(158deg,var(--card),rgba(255,255,255,.012));backdrop-filter:blur(12px);
-  transition:border-color .3s var(--ease),transform .3s var(--ease),box-shadow .3s var(--ease);
+.r::before{ /* colour bar that slides in on hover */
+  content:"";position:absolute;left:0;top:0;bottom:0;width:2px;opacity:0;
+  background:currentColor;transition:opacity .28s var(--e);
 }
-.card:hover{border-color:var(--stroke-hi);transform:translateY(-2px);box-shadow:0 20px 44px -26px rgba(0,0,0,.9)}
-.card h3{font:700 10.5px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--dimmer);margin-bottom:11px}
-.card p{font-size:12.5px;color:var(--dim);margin-top:7px;line-height:1.5}
+.r:hover{background:var(--s2)}
+.r:hover::before{opacity:1}
+.r.g{color:var(--on)} .r.r{color:var(--off)} .r.y{color:var(--warn)}
+.led{
+  width:11px;height:11px;border-radius:50%;margin-top:7px;background:var(--dimmer);
+  transition:background .32s,box-shadow .32s;
+}
+.led.g{background:var(--on); box-shadow:0 0 14px 3px var(--on-g), inset 0 0 3px rgba(255,255,255,.6); animation:led 2.8s ease-in-out infinite}
+.led.r{background:var(--off);box-shadow:0 0 14px 3px var(--off-g),inset 0 0 3px rgba(255,255,255,.5)}
+.led.y{background:var(--warn);box-shadow:0 0 14px 3px rgba(251,191,36,.42)}
+@keyframes led{50%{opacity:.48}}
+/* block, not inline — this is what keeps value and meaning apart */
+.k{display:block;font:700 11px/1.5 var(--mono);letter-spacing:.15em;color:var(--dimmer);text-transform:uppercase;padding-top:6px}
+.rv{display:block;font:700 16.5px/1.4 var(--mono);letter-spacing:-.005em;word-break:break-word;color:var(--txt)}
+.rm{display:block;font-size:13px;line-height:1.62;color:var(--dim);margin-top:6px;max-width:62ch}
+.r.g .rv{color:var(--on)} .r.r .rv{color:var(--off)} .r.y .rv{color:var(--warn)}
 
-.tg{display:flex;align-items:center;justify-content:space-between;gap:14px}
-.tg .lab{font:700 15px/1 var(--mono)}
+/* ── cards ──────────────────────────────────────────── */
+.grid{display:grid;gap:20px;grid-template-columns:repeat(auto-fit,minmax(304px,1fr));margin-bottom:24px}
+.card{
+  position:relative;border-radius:20px;padding:24px;border:1px solid var(--line);
+  background:linear-gradient(158deg,var(--s2),var(--s1) 60%,var(--bg2));
+  box-shadow:var(--hair),var(--sh1);
+  transition:border-color .32s var(--e),transform .32s var(--e),box-shadow .32s var(--e);
+}
+.card:hover{border-color:var(--line2);transform:translateY(-4px);box-shadow:var(--hair),var(--sh3)}
+.card h3{display:block;font:700 11px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--dimmer);margin-bottom:18px}
+.card p{display:block;font-size:13px;color:var(--dim);margin-top:16px;line-height:1.62}
+.card p b{color:var(--txt);font:700 13px var(--mono)}
+
+.tg{display:flex;align-items:center;justify-content:space-between;gap:20px}
+.tg .lab{display:block;font:700 16.5px/1.3 var(--mono);letter-spacing:-.01em}
 .mini{
-  --w:52px;--h:28px;width:var(--w);height:var(--h);flex:0 0 var(--w);border-radius:99px;cursor:pointer;
-  border:1px solid var(--stroke-hi);position:relative;padding:0;background:#0a0c13;
-  box-shadow:inset 0 2px 6px rgba(0,0,0,.8);transition:box-shadow .35s var(--ease);
+  width:58px;height:32px;flex:0 0 58px;border-radius:99px;cursor:pointer;padding:0;position:relative;
+  border:1px solid var(--line2);background:linear-gradient(180deg,#03040a,#121524);
+  box-shadow:inset 0 3px 9px rgba(0,0,0,.9);
+  transition:box-shadow .4s var(--e),border-color .4s var(--e);
 }
 .mini::after{
-  content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;
-  background:#3a3f52;box-shadow:0 2px 6px rgba(0,0,0,.7);
-  transition:transform .35s var(--ease),background .35s var(--ease);
+  content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;
+  background:radial-gradient(circle at 36% 28%,rgba(255,255,255,.4),transparent 55%),#434860;
+  box-shadow:0 3px 8px rgba(0,0,0,.8),0 0 0 1px rgba(255,255,255,.07);
+  transition:transform .4s var(--eb),background .4s var(--e),box-shadow .4s var(--e);
 }
-.mini[aria-checked="true"]{box-shadow:inset 0 2px 6px rgba(0,0,0,.6),0 0 20px -4px var(--on-g)}
-.mini[aria-checked="true"]::after{transform:translateX(24px);background:var(--on)}
-.mini:focus-visible{outline:2px solid var(--acc2);outline-offset:3px}
+.mini[aria-checked="true"]{border-color:rgba(42,230,146,.42);box-shadow:inset 0 3px 9px rgba(0,0,0,.6),0 0 26px -6px var(--on-g)}
+.mini[aria-checked="true"]::after{transform:translateX(26px);
+  background:radial-gradient(circle at 36% 28%,rgba(255,255,255,.5),transparent 55%),var(--on);
+  box-shadow:0 3px 8px rgba(0,0,0,.8),0 0 18px 3px var(--on-g)}
+.mini:focus-visible{outline:2px solid var(--acc2);outline-offset:4px}
 .mini:disabled{opacity:.45;cursor:not-allowed}
 
-.row{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:11px}
-input{
-  font:700 13.5px/1 var(--mono);color:var(--txt);padding:10px 12px;border-radius:9px;width:84px;
-  background:rgba(0,0,0,.42);border:1px solid var(--stroke);
-  transition:border-color .25s,box-shadow .25s;
+/* ── buttons ────────────────────────────────────────── */
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.btn{
+  --g1:var(--acc); --g2:var(--acc2); --glow:rgba(139,92,246,.5);
+  position:relative;display:inline-flex;align-items:center;gap:9px;
+  font:600 13.5px/1 inherit;letter-spacing:.005em;color:var(--txt);cursor:pointer;
+  padding:13px 19px;border-radius:13px;border:1px solid var(--line2);
+  background:linear-gradient(180deg,var(--s3),var(--s1));
+  overflow:hidden;isolation:isolate;
+  box-shadow:var(--hair),var(--sh1);
+  transition:transform .24s var(--e),box-shadow .32s var(--e),border-color .32s var(--e),color .32s var(--e);
 }
-input:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(139,92,246,.16)}
-button{
-  position:relative;font:600 13px/1 inherit;color:var(--txt);cursor:pointer;
-  padding:10px 15px;border-radius:9px;border:1px solid var(--stroke);
-  background:var(--card-hi);overflow:hidden;isolation:isolate;
-  transition:transform .2s var(--ease),box-shadow .26s,border-color .26s,opacity .2s;
+.btn svg{width:15px;height:15px;flex:0 0 15px;stroke:currentColor;fill:none;
+  stroke-width:2;stroke-linecap:round;stroke-linejoin:round;opacity:.8;
+  transition:opacity .32s var(--e),transform .32s var(--eb)}
+.btn::before{ /* the gradient face */
+  content:"";position:absolute;inset:0;z-index:-2;opacity:0;
+  background:linear-gradient(135deg,var(--g1),var(--g2));
+  transition:opacity .32s var(--e);
 }
-button::before{content:"";position:absolute;inset:0;z-index:-1;opacity:0;
-  background:linear-gradient(120deg,var(--acc),var(--acc2));transition:opacity .26s}
-button:hover:not(:disabled){transform:translateY(-2px);border-color:transparent;box-shadow:0 12px 26px -14px rgba(139,92,246,.7)}
-button:hover:not(:disabled)::before{opacity:1}
-button:active:not(:disabled){transform:none}
-button:disabled{opacity:.4;cursor:not-allowed}
-button:focus-visible{outline:2px solid var(--acc2);outline-offset:3px}
-button.danger{color:var(--off);border-color:rgba(255,77,106,.32)}
-button.danger::before{background:linear-gradient(120deg,var(--off),var(--off-d))}
-button.danger:hover{color:#fff;box-shadow:0 12px 26px -14px var(--off-g)}
+.btn::after{ /* specular sweep */
+  content:"";position:absolute;top:-30%;left:-75%;width:52%;height:160%;z-index:-1;
+  background:linear-gradient(105deg,transparent,rgba(255,255,255,.34),transparent);
+  transform:skewX(-20deg);transition:left .62s var(--e);
+}
+.btn:hover:not(:disabled){
+  transform:translateY(-3px);border-color:transparent;color:#04050a;
+  box-shadow:0 18px 36px -16px var(--glow),0 0 0 1px rgba(255,255,255,.12),inset 0 1px 0 rgba(255,255,255,.3);
+}
+.btn:hover:not(:disabled)::before{opacity:1}
+.btn:hover:not(:disabled)::after{left:130%}
+.btn:hover:not(:disabled) svg{opacity:1;transform:scale(1.1)}
+.btn:active:not(:disabled){transform:translateY(-1px) scale(.985);box-shadow:inset 0 4px 11px rgba(0,0,0,.5)}
+.btn:disabled{opacity:.38;cursor:not-allowed}
+.btn:focus-visible{outline:2px solid var(--acc2);outline-offset:3px}
+.btn.green{--g1:var(--on);--g2:#0fbd72;--glow:var(--on-g)}
+.btn.red{--g1:var(--off);--g2:var(--off-d);--glow:var(--off-g);color:var(--off);border-color:rgba(255,88,114,.34)}
+.btn.red:hover:not(:disabled){color:#fff}
 
-/* ── console ── */
-.console{border-radius:16px;border:1px solid var(--stroke);background:rgba(0,0,0,.5);overflow:hidden;backdrop-filter:blur(12px)}
-.console .bh{display:flex;align-items:center;gap:9px;padding:11px 17px;border-bottom:1px solid var(--stroke);
-  font:700 10.5px/1 var(--mono);letter-spacing:.18em;color:var(--dimmer);text-transform:uppercase}
-.console .bh i{width:9px;height:9px;border-radius:99px;background:#ff5f57;box-shadow:14px 0 0 #febc2e,28px 0 0 #28c840;margin-right:24px}
-.console pre{margin:0;padding:15px 17px;max-height:250px;overflow:auto;white-space:pre-wrap;word-break:break-word;
-  font:12.5px/1.62 var(--mono);color:#9fa7c0}
-.console pre:empty::after{content:"press a control and the output lands here";color:var(--dimmer)}
+input{
+  font:700 14px/1 var(--mono);color:var(--txt);padding:13px 15px;border-radius:13px;width:94px;
+  background:#04050b;border:1px solid var(--line2);
+  box-shadow:inset 0 2px 7px rgba(0,0,0,.7);
+  transition:border-color .28s var(--e),box-shadow .28s var(--e);
+}
+input::placeholder{color:var(--dimmer)}
+input:focus{outline:none;border-color:var(--acc);
+  box-shadow:inset 0 2px 7px rgba(0,0,0,.7),0 0 0 3px rgba(139,92,246,.2)}
+
+/* ── console ────────────────────────────────────────── */
+.console{
+  border-radius:20px;border:1px solid var(--line);overflow:hidden;
+  background:linear-gradient(180deg,var(--s1),var(--bg2));box-shadow:var(--hair),var(--sh2);
+}
+.console .bh i{width:10px;height:10px;border-radius:99px;background:#ff5f57;
+  box-shadow:16px 0 0 #febc2e,32px 0 0 #28c840;margin-right:30px}
+.console pre{
+  margin:0;padding:19px 24px;max-height:270px;overflow:auto;white-space:pre-wrap;word-break:break-word;
+  font:13px/1.72 var(--mono);color:#a6adc6;
+}
+.console pre:empty::after{content:"press a control — the output lands here";color:var(--dimmer)}
 .console pre b{color:var(--acc2);font-weight:700}
 .console pre .ok{color:var(--on)} .console pre .er{color:var(--off)}
+.console pre::-webkit-scrollbar{width:9px}
+.console pre::-webkit-scrollbar-thumb{background:var(--line2);border-radius:9px}
 
-.foot{margin-top:20px;text-align:center;font-size:12.5px;color:var(--dimmer);line-height:1.75}
+.foot{display:block;margin-top:30px;text-align:center;font-size:13px;color:var(--dimmer);line-height:1.95}
 .foot b{color:var(--dim);font-weight:600}
-.toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,150%);z-index:99;
-  padding:12px 20px;border-radius:11px;font:600 13.5px/1 var(--mono);
-  background:rgba(12,14,22,.96);border:1px solid var(--stroke-hi);backdrop-filter:blur(14px);
-  box-shadow:0 18px 44px -16px #000;transition:transform .4s var(--ease)}
+.toast{
+  position:fixed;left:50%;bottom:28px;transform:translate(-50%,170%);z-index:99;
+  padding:15px 24px;border-radius:14px;font:700 13.5px/1 var(--mono);letter-spacing:.01em;
+  background:linear-gradient(180deg,var(--s3),var(--s1));border:1px solid var(--line2);
+  box-shadow:var(--hair),var(--sh3);transition:transform .45s var(--eb);
+}
 .toast.show{transform:translate(-50%,0)}
-.toast.good{border-color:var(--on);color:var(--on)}
-.toast.bad{border-color:var(--off);color:var(--off)}
+.toast.good{border-color:var(--on);color:var(--on);box-shadow:var(--hair),var(--sh3),0 0 40px -14px var(--on-g)}
+.toast.bad{border-color:var(--off);color:var(--off);box-shadow:var(--hair),var(--sh3),0 0 40px -14px var(--off-g)}
+
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition-duration:.01ms!important}}
-@media (max-width:620px){
-  .r{grid-template-columns:14px 1fr;gap:11px}
-  .r .k{grid-column:2}.r .v,.r .m{grid-column:2}
-  .master{padding:22px}.master .state{font-size:25px}
+@media (max-width:640px){
+  .r{grid-template-columns:12px minmax(0,1fr);gap:15px}
+  .r .k,.r .cell{grid-column:2}
+  .master{padding:26px;gap:24px}.mtxt .state{font-size:27px}
+  .wrap{padding:30px 16px 60px}
+  .btn{padding:12px 16px}
 }
 </style>
 </head>
@@ -226,29 +320,26 @@ button.danger:hover{color:#fff;box-shadow:0 12px 26px -14px var(--off-g)}
   <header>
     <div class="brand">
       <h1>anonx</h1>
-      <span class="v" id="ver">v—</span>
+      <span class="tag" id="ver">v—</span>
       <span class="by">author: <b>sidh4ck3r</b></span>
     </div>
     <div class="live"><i id="pulse"></i><span id="livetxt">CONNECTING</span></div>
   </header>
 
-  <!-- one switch, one meaning -->
   <section class="master">
     <button class="switch" id="master" role="switch" aria-checked="false" aria-label="anonymous mode"></button>
-    <div class="txt">
-      <div class="state" id="state">CHECKING…</div>
-      <div class="exp" id="exp">Reading what iptables, Tor and your network links are actually doing.</div>
-      <div class="hint">Flip it, or press <kbd>S</kbd> to go anonymous · <kbd>X</kbd> to go back</div>
+    <div class="mtxt">
+      <span class="state" id="state">CHECKING…</span>
+      <span class="exp" id="exp">Reading what iptables, Tor and your network links are actually doing.</span>
+      <span class="hint">Flip the switch, or press <kbd>S</kbd> to go anonymous · <kbd>X</kbd> to go back</span>
     </div>
   </section>
 
-  <!-- the readout -->
   <section class="board">
     <div class="bh"><span>status</span><span id="upd">—</span></div>
-    <div class="rows" id="rows"></div>
+    <div id="rows"></div>
   </section>
 
-  <!-- switches you can flip -->
   <section class="grid">
     <div class="card">
       <div class="tg"><span class="lab">Start on boot</span>
@@ -258,13 +349,13 @@ button.danger:hover{color:#fff;box-shadow:0 12px 26px -14px var(--off-g)}
     <div class="card">
       <div class="tg"><span class="lab">Bridges</span>
         <button class="mini" id="t-bridges" role="switch" aria-checked="false" aria-label="bridges"></button></div>
-      <p>Turn on only if Tor itself is blocked on your network. Slower, so leave it off otherwise.</p>
+      <p>Only if Tor itself is blocked on your network. Slower — leave it off otherwise.</p>
     </div>
     <div class="card">
       <h3>Change IP every</h3>
       <div class="row">
         <input id="ivin" placeholder="2m" maxlength="6" aria-label="rotation interval">
-        <button data-act="interval" data-from="ivin">Save</button>
+        <button class="btn" data-act="interval" data-from="ivin"><svg viewBox="0 0 24 24"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="9"/></svg>Save</button>
       </div>
       <p>How often Tor is asked for a different exit. Now: <b id="iv">—</b></p>
     </div>
@@ -272,44 +363,43 @@ button.danger:hover{color:#fff;box-shadow:0 12px 26px -14px var(--off-g)}
       <h3>Leave Tor from</h3>
       <div class="row">
         <input id="ecin" placeholder="de" maxlength="3" aria-label="exit country">
-        <button data-act="exit" data-from="ecin">Set</button>
-        <button data-act="exit" data-arg="off">Any</button>
+        <button class="btn" data-act="exit" data-from="ecin"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/></svg>Set</button>
+        <button class="btn" data-act="exit" data-arg="off"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>Any</button>
       </div>
       <p>Two-letter country code. Now: <b id="ec">any</b></p>
     </div>
   </section>
 
-  <!-- one-shot actions -->
   <section class="grid">
     <div class="card">
       <h3>Do it once</h3>
       <div class="row">
-        <button data-act="ip">New IP</button>
-        <button data-act="mac">New MAC</button>
-        <button data-act="leaktest">Leak test</button>
+        <button class="btn" data-act="ip"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/></svg>New IP</button>
+        <button class="btn" data-act="mac"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h2M7 14h6"/></svg>New MAC</button>
+        <button class="btn" data-act="leaktest"><svg viewBox="0 0 24 24"><path d="M12 3s6 5.5 6 10a6 6 0 0 1-12 0c0-4.5 6-10 6-10Z"/></svg>Leak test</button>
       </div>
-      <p>New IP gives you a different exit. New MAC re-randomizes your hardware address.</p>
+      <p>New IP gives you a different exit node. New MAC re-randomizes your hardware address.</p>
     </div>
     <div class="card">
       <h3>If something breaks</h3>
       <div class="row">
-        <button data-act="doctor">Diagnose</button>
-        <button data-act="repair">Repair</button>
-        <button class="danger" data-act="panic">Panic</button>
+        <button class="btn" data-act="doctor"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg>Diagnose</button>
+        <button class="btn" data-act="repair"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 1 5 5L18 13l-7 7-4-4 7-7Z"/></svg>Repair</button>
+        <button class="btn red" data-act="panic"><svg viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 2.4 17a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>Panic</button>
       </div>
       <p>Panic cuts every connection and puts you back on your real identity immediately.</p>
     </div>
   </section>
 
   <section class="console">
-    <div class="bh"><i></i>output</div>
+    <div class="bh"><span><i></i>output</span></div>
     <pre id="out"></pre>
   </section>
 
-  <p class="foot">
-    This panel is on <b>127.0.0.1</b> only, needs the token in your URL, and closes itself after an hour idle.<br>
+  <span class="foot">
+    This panel lives on <b>127.0.0.1</b> only, needs the token in your URL, and closes itself after an hour idle.<br>
     anonx hides your <b>IP, DNS and MAC</b>. It cannot hide who you log in as — for browsing, use <b>Tor Browser</b>.
-  </p>
+  </span>
 </div>
 <div class="toast" id="toast"></div>
 
@@ -330,25 +420,25 @@ function log(t,x,ok){
 }
 const fmt=s=>{const n=+s||180;return n<60?n+"s":n<3600?(n/60).toFixed(n%60?1:0)+"m":(n/3600).toFixed(n%3600?1:0)+"h";};
 
-/* Every row states the reading, then what it means for you. The meaning is the
-   point — "REJECT rule present" tells a stranger nothing. */
+/* value first, then what it means for you — "REJECT rule present" tells
+   a stranger nothing about whether they are safe */
 function rows(s){
   const r=[];
   r.push(s.anonymous
     ? {l:"g",k:"Your IP",v:"hidden",m:"Sites see a Tor exit node's address, not yours."}
     : {l:"r",k:"Your IP",v:"visible",m:"Every site you open sees your real address."});
   r.push(s.locked
-    ? {l:"g",k:"Kill switch",v:"armed",m:"If Tor stops, traffic stops too — it cannot fall back to the open internet."}
+    ? {l:"g",k:"Kill switch",v:"armed",m:"If Tor stops, your traffic stops with it — it cannot fall back to the open internet."}
     : {l:"r",k:"Kill switch",v:"off",m:"Apps are connecting straight out, with nothing in the way."});
   r.push(s.tor&&s.trans ? {l:"g",k:"Tor",v:"carrying traffic",m:"Connected, and the transparent ports are open."}
-    : s.tor ? {l:"y",k:"Tor",v:"still starting",m:"Running, but no circuits yet. Give it a moment."}
+    : s.tor ? {l:"y",k:"Tor",v:"still starting",m:"Running, but it has no circuits yet. Give it a moment."}
     : {l:"r",k:"Tor",v:"stopped",m:"Nothing is being routed through Tor at all."});
   r.push(s.resolv==="127.0.0.1"&&s.dns_ok
     ? {l:"g",k:"DNS",v:"inside Tor",m:"Your ISP cannot see which sites you look up."}
     : s.resolv==="127.0.0.1"
-    ? {l:"y",k:"DNS",v:"pinned, no answer",m:"Pointed at Tor but nothing is replying. Try Repair."}
+    ? {l:"y",k:"DNS",v:"pinned, no answer",m:"Pointed at Tor, but nothing is replying. Try Repair."}
     : {l:"r",k:"DNS",v:s.resolv||"unknown",m:"Your router or ISP sees the name of every site you visit."});
-  r.push(s.ipv6_blocked ? {l:"g",k:"IPv6",v:"blocked",m:"Tor is IPv4-only, so any IPv6 route would expose you. Closed."}
+  r.push(s.ipv6_blocked ? {l:"g",k:"IPv6",v:"blocked",m:"Tor is IPv4-only, so any IPv6 route would expose you. It is closed."}
     : {l:"r",k:"IPv6",v:"open",m:"Sites reachable over IPv6 can still see you as yourself."});
   r.push(s.hardened ? {l:"g",k:"Browser",v:"hardened",m:`Firefox reports a uniform fingerprint and WebRTC is off (${s.hardened} profile).`}
     : s.locked ? {l:"r",k:"Browser",v:"not hardened",m:"Canvas, fonts and WebGL can still fingerprint you."}
@@ -368,11 +458,11 @@ function render(s){
   document.body.classList.toggle("off",!on);
   $("#ver").textContent="v"+(s.version||"?");
   $("#master").setAttribute("aria-checked",String(on));
-  $("#state").textContent = on?"ANONYMOUS":(s.locked?"NOT WORKING":"OFF");
-  $("#exp").textContent = on
+  $("#state").textContent=on?"ANONYMOUS":(s.locked?"NOT WORKING":"OFF");
+  $("#exp").textContent=on
     ? "Every connection and every DNS lookup on this machine is leaving through Tor."
     : s.locked
-    ? "The firewall is holding, but Tor is not carrying traffic. Nothing is leaking — nothing works either. Try Repair."
+    ? "The firewall is holding, but Tor is not carrying traffic. Nothing is leaking — and nothing works either. Try Repair."
     : "Nothing is hidden. Your real IP, DNS and hardware address are all visible.";
   $("#iv").textContent=fmt(s.interval);
   $("#ec").textContent=s.exit_country?s.exit_country.toUpperCase():"any";
@@ -382,15 +472,17 @@ function render(s){
 
   const data=rows(s), box=$("#rows");
   if(box.children.length!==data.length){
-    box.innerHTML=data.map(()=>`<div class="r"><span class="led"></span><span class="k"></span><span><span class="v"></span><span class="m"></span></span></div>`).join("");
+    box.innerHTML=data.map(()=>
+      `<div class="r"><span class="led"></span><span class="k"></span>`+
+      `<span class="cell"><span class="rv"></span><span class="rm"></span></span></div>`).join("");
   }
   data.forEach((d,i)=>{
     const el=box.children[i];
     el.className="r "+d.l;
     el.querySelector(".led").className="led "+d.l;
     el.querySelector(".k").textContent=d.k;
-    el.querySelector(".v").textContent=d.v;
-    el.querySelector(".m").textContent=d.m;
+    el.querySelector(".rv").textContent=d.v;
+    el.querySelector(".rm").textContent=d.m;
   });
 }
 
@@ -422,8 +514,8 @@ async function act(name,arg,label){
 
 $("#master").addEventListener("click",()=>{
   if(!last) return;
-  last.anonymous||last.locked ? act("stop","","Going back to real")
-                              : act("start","","Going anonymous");
+  (last.anonymous||last.locked) ? act("stop","","Going back to real")
+                                : act("start","","Going anonymous");
 });
 $("#t-boot").addEventListener("click",e=>{
   const on=e.currentTarget.getAttribute("aria-checked")==="true";
@@ -434,7 +526,7 @@ $("#t-bridges").addEventListener("click",e=>{
   act("bridges",on?"off":"on",on?"Bridges off":"Bridges on");
 });
 document.addEventListener("click",e=>{
-  const b=e.target.closest("button[data-act]"); if(!b) return;
+  const b=e.target.closest(".btn[data-act]"); if(!b) return;
   let arg=b.dataset.arg||"";
   if(b.dataset.from){
     arg=($("#"+b.dataset.from).value||"").trim();
@@ -445,8 +537,9 @@ document.addEventListener("click",e=>{
 });
 document.addEventListener("keydown",e=>{
   if(e.target.tagName==="INPUT") return;
-  if(e.key==="s"||e.key==="S") !last?.anonymous && act("start","","Going anonymous");
-  if(e.key==="x"||e.key==="X") (last?.anonymous||last?.locked) && act("stop","","Going back to real");
+  const k=e.key.toLowerCase();
+  if(k==="s" && !last?.anonymous) act("start","","Going anonymous");
+  if(k==="x" && (last?.anonymous||last?.locked)) act("stop","","Going back to real");
 });
 
 poll(); setInterval(poll,4000);
