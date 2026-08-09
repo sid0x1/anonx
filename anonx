@@ -1979,16 +1979,6 @@ if [ "$(id -u)" -eq 0 ] && resolv_stuck && [ "$CMD" != "start" ] && [ "$CMD" != 
   info "fix it with:  ${G}sudo anonx repair${N}"
 fi
 
-# If the directory you launched from has been deleted, bash printed its
-# "shell-init: ... getcwd" complaint before this script got control — nothing in
-# here can suppress that, it happens while the interpreter is still starting.
-# What we CAN do is stop it looking like anonx broke, and say how to end it.
-# (We already moved to / at startup, so no child of ours repeats it.)
-if [ -n "$ANONX_PWD" ] && [ ! -d "$ANONX_PWD" ]; then
-  warn "the directory you ran this from no longer exists"
-  info "  that ${W}shell-init: getcwd${N} line above is your shell, not anonx ${D}· ${G}cd ~${N} ${D}ends it${N}"
-fi
-
 # `anonx start 45s` / `anonx start --interval 2m` — one-off or new saved default
 case "$CMD" in
   start|restart)
