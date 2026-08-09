@@ -190,6 +190,13 @@ hour idle. Needs `python3`; without it you lose `anonx ui` and nothing else.
 
 <sub>One glance tells you everything — the verdict up top, every layer explained below.</sub>
 
+<br><br>
+
+<img src="assets/panel.svg" alt="anonx control panel — the ANONYMOUS view" width="86%">
+
+<sub><code>sudo anonx ui</code> — one switch for anonymous on/off, and a board where every
+reading says what it <i>means</i>, not just what it is.</sub>
+
 </div>
 
 <br>

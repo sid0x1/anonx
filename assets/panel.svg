@@ -1,0 +1,178 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 1012" width="880" height="1012" role="img" aria-label="anonx control panel — the ANONYMOUS view">
+  <defs>
+    <filter id="pdrop" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="22" stdDeviation="28" flood-color="#000000" flood-opacity="0.6"/>
+    </filter>
+    <linearGradient id="ptbar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#171b2b"/><stop offset="1" stop-color="#0e1120"/>
+    </linearGradient>
+    <linearGradient id="pbrand" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0.05" stop-color="#ffffff"/><stop offset="0.5" stop-color="#8b5cf6"/><stop offset="0.92" stop-color="#22d3ee"/>
+    </linearGradient>
+    <linearGradient id="pcard" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#161a2b"/><stop offset="0.6" stop-color="#0b0d16"/><stop offset="1" stop-color="#070912"/>
+    </linearGradient>
+    <linearGradient id="pstrip" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#101320"/><stop offset="1" stop-color="#0b0d16"/>
+    </linearGradient>
+    <linearGradient id="ptrack" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#020306"/><stop offset="1" stop-color="#151929"/>
+    </linearGradient>
+    <linearGradient id="pknob" x1="0.3" y1="0.2" x2="0.75" y2="0.9">
+      <stop offset="0" stop-color="#8bffcb"/><stop offset="0.5" stop-color="#2ae692"/><stop offset="1" stop-color="#0f9c5f"/>
+    </linearGradient>
+    <linearGradient id="pbtn" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#161a2b"/><stop offset="1" stop-color="#0b0d16"/>
+    </linearGradient>
+    <linearGradient id="pbtnhot" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+    <radialGradient id="pamb" cx="0.5" cy="1" r="0.75">
+      <stop offset="0" stop-color="#2ae692" stop-opacity="0.16"/><stop offset="1" stop-color="#2ae692" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="pamb2" cx="0.12" cy="0.08" r="0.6">
+      <stop offset="0" stop-color="#8b5cf6" stop-opacity="0.2"/><stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="pglow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+    <filter id="pglowsm" x="-90%" y="-90%" width="280%" height="280%">
+      <feGaussianBlur stdDeviation="2.6"/>
+    </filter>
+    <style>
+      .m{font-family:"SF Mono",Menlo,Consolas,monospace}
+      .s{font-family:-apple-system,"Segoe UI",Inter,Roboto,sans-serif}
+      .key{font-size:10.5px;letter-spacing:1.6px;fill:#666d87;font-weight:700}
+      .val{font-size:15px;font-weight:700}
+      .mean{font-size:12px;fill:#989eb6}
+      .lbl{font-size:10.5px;letter-spacing:2.1px;fill:#666d87;font-weight:700}
+    </style>
+  </defs>
+
+  <!-- window -->
+  <g filter="url(#pdrop)">
+    <rect x="10" y="10" width="860" height="992" rx="15" fill="#04050a" stroke="#272c42"/>
+    <path d="M10 25a15 15 0 0 1 15-15h830a15 15 0 0 1 15 15v22H10z" fill="url(#ptbar)"/>
+    <rect x="10" y="46" width="860" height="1" fill="#272c42"/>
+  </g>
+  <circle cx="34" cy="29" r="6" fill="#ff5f57"/><circle cx="54" cy="29" r="6" fill="#febc2e"/><circle cx="74" cy="29" r="6" fill="#28c840"/>
+  <rect x="286" y="18" width="308" height="22" rx="11" fill="#04050a" stroke="#272c42"/>
+  <text class="m" x="440" y="33" text-anchor="middle" font-size="11" fill="#989eb6">127.0.0.1:41823/?t=•••••••••</text>
+
+  <!-- ambient -->
+  <rect x="11" y="47" width="858" height="954" fill="url(#pamb2)"/>
+  <rect x="11" y="47" width="858" height="954" fill="url(#pamb)"/>
+
+  <!-- header -->
+  <text class="m" x="42" y="97" font-size="25" font-weight="800" fill="url(#pbrand)" letter-spacing="-1">anonx</text>
+  <rect x="139" y="80" width="43" height="23" rx="7" fill="#101320" stroke="#272c42"/>
+  <text class="m" x="160.5" y="95.5" text-anchor="middle" font-size="11" font-weight="700" fill="#989eb6">v1.3</text>
+  <text class="s" x="196" y="96" font-size="12.5" fill="#666d87">author: <tspan fill="#989eb6" font-weight="600">sidh4ck3r</tspan></text>
+  <rect x="742" y="78" width="96" height="28" rx="14" fill="#101320" stroke="#272c42"/>
+  <circle cx="761" cy="92" r="4" fill="#2ae692"/><circle cx="761" cy="92" r="4" fill="#2ae692" filter="url(#pglowsm)"/>
+  <text class="m" x="775" y="96" font-size="10.5" font-weight="700" fill="#989eb6" letter-spacing="1.6">LIVE</text>
+
+  <!-- master -->
+  <rect x="34" y="124" width="812" height="146" rx="22" fill="url(#pcard)" stroke="#2ae692" stroke-opacity="0.3"/>
+  <rect x="64" y="169" width="108" height="55" rx="27.5" fill="url(#ptrack)" stroke="#2ae692" stroke-opacity="0.34"/>
+  <rect x="67" y="172" width="102" height="49" rx="24.5" fill="#0a8551" opacity="0.5"/>
+  <circle cx="144" cy="196.5" r="22" fill="#2ae692" opacity="0.5" filter="url(#pglow)"/>
+  <circle cx="144" cy="196.5" r="22" fill="url(#pknob)" stroke="#ffffff" stroke-opacity="0.12"/>
+  <text class="m" x="206" y="182" font-size="30" font-weight="800" fill="#2ae692" letter-spacing="-1">ANONYMOUS</text>
+  <text class="s" x="206" y="209" font-size="13.5" fill="#989eb6">Every connection and every DNS lookup on this machine is</text>
+  <text class="s" x="206" y="228" font-size="13.5" fill="#989eb6">leaving through Tor.</text>
+  <text class="s" x="206" y="252" font-size="12" fill="#666d87">Flip the switch, or press S to go anonymous · X to go back</text>
+
+  <!-- status board -->
+  <rect x="34" y="286" width="812" height="484" rx="19" fill="#0b0d16" stroke="#1b1f30"/>
+  <path d="M34 305a19 19 0 0 1 19-19h774a19 19 0 0 1 19 19v25H34z" fill="url(#pstrip)"/>
+  <rect x="34" y="330" width="812" height="1" fill="#1b1f30"/>
+  <text class="m lbl" x="58" y="313">STATUS</text>
+  <text class="m" x="822" y="313" text-anchor="end" font-size="10.5" letter-spacing="1" fill="#666d87">21:44:07</text>
+
+  <g>
+    <!-- row 1 -->
+    <circle cx="63" cy="362" r="5.5" fill="#2ae692"/><circle cx="63" cy="362" r="5.5" fill="#2ae692" filter="url(#pglowsm)"/>
+    <text class="m key" x="84" y="358">YOUR IP</text>
+    <text class="m val" x="236" y="360" fill="#2ae692">hidden</text>
+    <text class="s mean" x="236" y="379">Sites see a Tor exit node's address, not yours.</text>
+    <rect x="34" y="386" width="812" height="1" fill="#1b1f30"/>
+
+    <!-- row 2 -->
+    <circle cx="63" cy="418" r="5.5" fill="#2ae692"/><circle cx="63" cy="418" r="5.5" fill="#2ae692" filter="url(#pglowsm)"/>
+    <text class="m key" x="84" y="414">KILL SWITCH</text>
+    <text class="m val" x="236" y="416" fill="#2ae692">armed</text>
+    <text class="s mean" x="236" y="435">If Tor stops, your traffic stops with it — it cannot fall back to the open internet.</text>
+    <rect x="34" y="442" width="812" height="1" fill="#1b1f30"/>
+
+    <!-- row 3 -->
+    <circle cx="63" cy="474" r="5.5" fill="#2ae692"/><circle cx="63" cy="474" r="5.5" fill="#2ae692" filter="url(#pglowsm)"/>
+    <text class="m key" x="84" y="470">TOR</text>
+    <text class="m val" x="236" y="472" fill="#2ae692">carrying traffic</text>
+    <text class="s mean" x="236" y="491">Connected, and the transparent ports are open.</text>
+    <rect x="34" y="498" width="812" height="1" fill="#1b1f30"/>
+
+    <!-- row 4 -->
+    <circle cx="63" cy="530" r="5.5" fill="#2ae692"/><circle cx="63" cy="530" r="5.5" fill="#2ae692" filter="url(#pglowsm)"/>
+    <text class="m key" x="84" y="526">DNS</text>
+    <text class="m val" x="236" y="528" fill="#2ae692">inside Tor</text>
+    <text class="s mean" x="236" y="547">Your ISP cannot see which sites you look up.</text>
+    <rect x="34" y="554" width="812" height="1" fill="#1b1f30"/>
+
+    <!-- row 5 -->
+    <circle cx="63" cy="586" r="5.5" fill="#2ae692"/><circle cx="63" cy="586" r="5.5" fill="#2ae692" filter="url(#pglowsm)"/>
+    <text class="m key" x="84" y="582">IPV6</text>
+    <text class="m val" x="236" y="584" fill="#2ae692">blocked</text>
+    <text class="s mean" x="236" y="603">Tor is IPv4-only, so any IPv6 route would expose you. It is closed.</text>
+    <rect x="34" y="610" width="812" height="1" fill="#1b1f30"/>
+
+    <!-- row 6 -->
+    <circle cx="63" cy="642" r="5.5" fill="#2ae692"/><circle cx="63" cy="642" r="5.5" fill="#2ae692" filter="url(#pglowsm)"/>
+    <text class="m key" x="84" y="638">BROWSER</text>
+    <text class="m val" x="236" y="640" fill="#2ae692">hardened</text>
+    <text class="s mean" x="236" y="659">Firefox reports a uniform fingerprint and WebRTC is off (1 profile).</text>
+    <rect x="34" y="666" width="812" height="1" fill="#1b1f30"/>
+
+    <!-- row 7 -->
+    <circle cx="63" cy="698" r="5.5" fill="#2ae692"/><circle cx="63" cy="698" r="5.5" fill="#2ae692" filter="url(#pglowsm)"/>
+    <text class="m key" x="84" y="694">IP CHANGES</text>
+    <text class="m val" x="236" y="696" fill="#2ae692">every 3m</text>
+    <text class="s mean" x="236" y="715">2026-08-09 21:43:12  rotated -&gt; 185.220.101.34</text>
+    <rect x="34" y="722" width="812" height="1" fill="#1b1f30"/>
+
+    <!-- row 8 -->
+    <circle cx="63" cy="754" r="5.5" fill="#2ae692"/><circle cx="63" cy="754" r="5.5" fill="#2ae692" filter="url(#pglowsm)"/>
+    <text class="m key" x="84" y="750">MAC WLAN0</text>
+    <text class="m val" x="236" y="752" fill="#2ae692">8a:3f:1d:c4:70:e9</text>
+    <text class="s mean" x="236" y="771">Fake. Your real one (14:13:33:72:67:47) is hidden from this network.</text>
+  </g>
+
+  <!-- cards -->
+  <rect x="34" y="788" width="396" height="96" rx="17" fill="url(#pcard)" stroke="#1b1f30"/>
+  <text class="m" x="58" y="820" font-size="16" font-weight="700" fill="#f1f3fa">Start on boot</text>
+  <rect x="348" y="806" width="56" height="30" rx="15" fill="#03040a" stroke="#2ae692" stroke-opacity="0.42"/>
+  <circle cx="388" cy="821" r="11" fill="#2ae692"/><circle cx="388" cy="821" r="11" fill="#2ae692" filter="url(#pglowsm)"/>
+  <text class="s" x="58" y="855" font-size="12.5" fill="#989eb6">Go anonymous automatically every time this</text>
+  <text class="s" x="58" y="872" font-size="12.5" fill="#989eb6">machine boots.</text>
+
+  <rect x="450" y="788" width="396" height="96" rx="17" fill="url(#pcard)" stroke="#1b1f30"/>
+  <text class="m lbl" x="474" y="814">DO IT ONCE</text>
+  <rect x="474" y="826" width="98" height="40" rx="12" fill="url(#pbtnhot)"/>
+  <path d="M501 840a8 8 0 1 1-2.7-6M501 833v4.5h-4.5" stroke="#04050a" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <text class="s" x="510" y="851" font-size="13" font-weight="600" fill="#04050a">New IP</text>
+  <rect x="584" y="826" width="112" height="40" rx="12" fill="url(#pbtn)" stroke="#272c42"/>
+  <rect x="602" y="839" width="15" height="10" rx="2.5" stroke="#e6e9f2" stroke-width="1.7" fill="none"/>
+  <text class="s" x="625" y="851" font-size="13" font-weight="600" fill="#f1f3fa">New MAC</text>
+  <rect x="708" y="826" width="112" height="40" rx="12" fill="url(#pbtn)" stroke="#272c42"/>
+  <path d="M732 838c0-2.6 3.4-5.6 3.4-5.6s3.4 3 3.4 5.6a3.4 3.4 0 0 1-6.8 0Z" stroke="#e6e9f2" stroke-width="1.7" fill="none" stroke-linejoin="round"/>
+  <text class="s" x="747" y="851" font-size="13" font-weight="600" fill="#f1f3fa">Leak test</text>
+
+  <!-- console -->
+  <rect x="34" y="900" width="812" height="88" rx="17" fill="#0b0d16" stroke="#1b1f30"/>
+  <path d="M34 917a17 17 0 0 1 17-17h778a17 17 0 0 1 17 17v20H34z" fill="url(#pstrip)"/>
+  <rect x="34" y="937" width="812" height="1" fill="#1b1f30"/>
+  <circle cx="60" cy="919" r="4.5" fill="#ff5f57"/><circle cx="76" cy="919" r="4.5" fill="#febc2e"/><circle cx="92" cy="919" r="4.5" fill="#28c840"/>
+  <text class="m lbl" x="112" y="922">OUTPUT</text>
+  <text class="m" x="58" y="959" font-size="12" fill="#22d3ee">[21:43:12] New IP</text>
+  <text class="m" x="58" y="977" font-size="12" fill="#2ae692">✔ new exit IP:   185.220.101.34</text>
+</svg>
